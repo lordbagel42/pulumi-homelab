@@ -18,7 +18,6 @@ const provider = new proxmox.Provider("proxmox", {
 	password: config.requireSecret("PROXMOX_PASSWORD"),
 	insecure: config.getBoolean("PROXMOX_INSECURE") ?? false,
 	ssh: {
-		...(isHosted ? { socks5Server: "127.0.0.1:1080" } : {}),
 		nodes: [{
 			name: "optiplex",
 			address: endpoint.apply(e => new URL(e).hostname),

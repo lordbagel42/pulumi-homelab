@@ -1,0 +1,50 @@
+name: Deploy
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Install Netbird
+        run: curl -fsSL https://pkgs.netbird.io/install.sh | sudo bash
+
+      - name: Connect Netbird
+        run: sudo netbird up --setup-key ${{ secrets.NB_SETUP_KEY }} --headless
+
+      - name: Wait for Netbird peer connection
+        run: |
+          for i in $(seq 1 30); do
+            if sudo netbird status | grep -q "Connected"; then
+              echo "Netbird connected"
+              break
+            fi
+            echo "Waiting for Netbird... ($i/30)"
+            sleep 2
+          done
+
+      - name: Deploy with Pulumi
+        env:
+          PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
+          HOSTED: "true"
+        run: pnpm pulumi up --yes --stack dev
+
+      - name: Disconnect Netbird
+        if: always()
+        run: sudo netbird down

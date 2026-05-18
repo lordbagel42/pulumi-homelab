@@ -13,11 +13,6 @@ const CONSUL_IP = `192.168.0.${CONSUL_VMID}`;
 const NOMAD_IP = `192.168.0.${NOMAD_VMID}`;
 const GATEWAY = "192.168.0.1";
 
-const isHosted = process.env.HOSTED === "true";
-const sshProxy = isHosted
-	? `-o ProxyCommand="nc -X 5 -x 127.0.0.1:1080 %h %p"`
-	: "";
-
 export interface HashistackArgs {
 	provider: proxmox.Provider;
 	vmPassword: pulumi.Output<string>;
@@ -42,7 +37,7 @@ function sshSetup(
 key=$(mktemp)
 chmod 600 "$key"
 printf '%s' "$_SSH_KEY" > "$key"
-ssh -i "$key" -o StrictHostKeyChecking=no ${sshProxy} root@${host} "${remoteEnv} bash -s" < "${scriptPath}"
+ssh -i "$key" -o StrictHostKeyChecking=no root@${host} "${remoteEnv} bash -s" < "${scriptPath}"
 rm -f "$key"
 		`.trim(),
 		environment: {
