@@ -13,11 +13,42 @@ const CONSUL_IP = `192.168.0.${CONSUL_VMID}`;
 const NOMAD_IP = `192.168.0.${NOMAD_VMID}`;
 const GATEWAY = "192.168.0.1";
 
+const isHosted = process.env.HOSTED === "true";
+const sshProxy = isHosted
+	? `-o ProxyCommand="nc -X 5 -x 127.0.0.1:1080 %h %p"`
+	: "";
+
 export interface HashistackArgs {
 	provider: proxmox.Provider;
 	vmPassword: pulumi.Output<string>;
 	sshKey: string;
 	sshPrivateKey: pulumi.Output<string>;
+}
+
+function sshSetup(
+	name: string,
+	host: string,
+	scriptPath: string,
+	env: Record<string, string>,
+	sshPrivateKey: pulumi.Output<string>,
+	dependsOn: pulumi.Resource[],
+): command.local.Command {
+	const remoteEnv = Object.entries(env)
+		.map(([k, v]) => `${k}=${v}`)
+		.join(" ");
+
+	return new command.local.Command(name, {
+		create: `
+key=$(mktemp)
+chmod 600 "$key"
+printf '%s' "$_SSH_KEY" > "$key"
+ssh -i "$key" -o StrictHostKeyChecking=no ${sshProxy} root@${host} "${remoteEnv} bash -s" < "${scriptPath}"
+rm -f "$key"
+		`.trim(),
+		environment: {
+			_SSH_KEY: sshPrivateKey,
+		},
+	}, { dependsOn });
 }
 
 export function createHashistack({
@@ -26,110 +57,72 @@ export function createHashistack({
 	sshKey,
 	sshPrivateKey,
 }: HashistackArgs): void {
-	const consulScript = fs.readFileSync(
-		path.join(__dirname, "consul-setup.sh"),
-		"utf-8",
-	);
-	const nomadScript = fs.readFileSync(
-		path.join(__dirname, "nomad-setup.sh"),
-		"utf-8",
-	);
+	const consulScriptPath = path.join(__dirname, "consul-setup.sh");
+	const nomadScriptPath = path.join(__dirname, "nomad-setup.sh");
 
-	const mkConnection = (host: string) => ({
-		host,
-		user: "root",
-		privateKey: sshPrivateKey,
-		dialErrorLimit: 30,
-		perDialTimeout: 15,
-	});
+	const consulContainer = new proxmox.ContainerLegacy("consul-server", {
+		nodeName: "optiplex",
+		vmId: CONSUL_VMID,
 
-	const consulContainer = new proxmox.ContainerLegacy(
-		"consul-server",
-		{
-			nodeName: "optiplex",
-			vmId: CONSUL_VMID,
+		cpu: { cores: 1 },
+		memory: { dedicated: 256 },
+		disk: { datastoreId: "local-lvm", size: 4 },
 
-			cpu: { cores: 1 },
-			memory: { dedicated: 256 },
-			disk: { datastoreId: "local-lvm", size: 4 },
-
-			operatingSystem: {
-				templateFileId: "local:vztmpl/debian-13-standard_13.1-2_amd64.tar.zst",
-				type: "debian",
-			},
-
-			networkInterfaces: [{ name: "veth0", bridge: "vmbr0" }],
-
-			initialization: {
-				hostname: "consul-server",
-				ipConfigs: [{ ipv4: { address: `${CONSUL_IP}/24`, gateway: GATEWAY } }],
-				userAccount: { password: vmPassword, keys: [sshKey] },
-			},
-
-			tags: ["hashistack", "system"],
-
-			startOnBoot: true,
-			started: true,
+		operatingSystem: {
+			templateFileId: "local:vztmpl/debian-13-standard_13.1-2_amd64.tar.zst",
+			type: "debian",
 		},
-		{ provider },
-	);
 
-	new command.remote.Command(
-		"consul-setup",
-		{
-			connection: mkConnection(CONSUL_IP),
-			create: consulScript,
-			environment: {
-				CONSUL_IP,
-				CONSUL_VERSION,
-			},
+		networkInterfaces: [{ name: "veth0", bridge: "vmbr0" }],
+
+		initialization: {
+			hostname: "consul-server",
+			ipConfigs: [{ ipv4: { address: `${CONSUL_IP}/24`, gateway: GATEWAY } }],
+			userAccount: { password: vmPassword, keys: [sshKey] },
 		},
-		{ dependsOn: [consulContainer] },
-	);
 
-	const nomadContainer = new proxmox.ContainerLegacy(
-		"nomad-server",
-		{
-			nodeName: "optiplex",
-			vmId: NOMAD_VMID,
+		tags: ["hashistack", "system"],
 
-			cpu: { cores: 4 },
-			memory: { dedicated: 8192 },
-			disk: { datastoreId: "local-lvm", size: 80 },
+		startOnBoot: true,
+		started: true,
+	}, { provider });
 
-			operatingSystem: {
-				templateFileId: "local:vztmpl/debian-13-standard_13.1-2_amd64.tar.zst",
-				type: "debian",
-			},
+	sshSetup("consul-setup", CONSUL_IP, consulScriptPath, {
+		CONSUL_IP,
+		CONSUL_VERSION,
+	}, sshPrivateKey, [consulContainer]);
 
-			networkInterfaces: [{ name: "veth0", bridge: "vmbr0" }],
+	const nomadContainer = new proxmox.ContainerLegacy("nomad-server", {
+		nodeName: "optiplex",
+		vmId: NOMAD_VMID,
 
-			initialization: {
-				hostname: "nomad-server",
-				ipConfigs: [{ ipv4: { address: `${NOMAD_IP}/24`, gateway: GATEWAY } }],
-				userAccount: { password: vmPassword, keys: [sshKey] },
-			},
+		cpu: { cores: 4 },
+		memory: { dedicated: 8192 },
+		disk: { datastoreId: "local-lvm", size: 80 },
 
-			tags: ["hashistack", "system"],
-
-			startOnBoot: true,
-			started: true,
+		operatingSystem: {
+			templateFileId: "local:vztmpl/debian-13-standard_13.1-2_amd64.tar.zst",
+			type: "debian",
 		},
-		{ provider },
-	);
 
-	new command.remote.Command(
-		"nomad-setup",
-		{
-			connection: mkConnection(NOMAD_IP),
-			create: nomadScript,
-			environment: {
-				CONSUL_IP,
-				CONSUL_VERSION,
-				NOMAD_IP,
-				NOMAD_VERSION,
-			},
+		networkInterfaces: [{ name: "veth0", bridge: "vmbr0" }],
+
+		initialization: {
+			hostname: "nomad-server",
+			ipConfigs: [{ ipv4: { address: `${NOMAD_IP}/24`, gateway: GATEWAY } }],
+			userAccount: { password: vmPassword, keys: [sshKey] },
 		},
-		{ dependsOn: [nomadContainer, consulContainer] },
-	);
+
+		tags: ["hashistack", "system"],
+
+		startOnBoot: true,
+		started: true,
+	}, { provider });
+
+	sshSetup("nomad-setup", NOMAD_IP, nomadScriptPath, {
+		CONSUL_IP,
+		CONSUL_VERSION,
+		NOMAD_IP,
+		NOMAD_VERSION,
+	}, sshPrivateKey, [nomadContainer, consulContainer]);
 }
