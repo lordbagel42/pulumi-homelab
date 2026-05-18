@@ -1,5 +1,0 @@
-environment:
-  - default/homelab
-config:
-  pulumi-homelab:PROXMOX_ENDPOINT:
-    secure: AAABAAFj/AesY44/y1bBDwj6x3TOeHtcGb+97sDa2uaR4Tl4NghQX1IUFehR10lUVylgGJKR3Do8
