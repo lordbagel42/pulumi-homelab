@@ -5,8 +5,8 @@
 //   400–599: VMs
 //     400–409: testing           (ubuntu-testing: 400)
 
-import { hashistackLxcs } from "./lxcs/hashistack";
+import { LXCDefinition } from "./lxc-config";
 import { testingVms } from "./vms/testing";
 
-export const allLxcs = [...hashistackLxcs];
+export const allLxcs: LXCDefinition[] = [];
 export const allVms = [...testingVms];

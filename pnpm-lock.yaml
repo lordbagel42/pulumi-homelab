@@ -11,6 +11,9 @@ importers:
       '@muhlba91/pulumi-proxmoxve':
         specifier: ^8.1.0
         version: 8.1.0(typescript@5.9.3)
+      '@pulumi/command':
+        specifier: ^1.0.0
+        version: 1.2.1(typescript@5.9.3)
       '@pulumi/pulumi':
         specifier: ^3.113.0
         version: 3.239.0(typescript@5.9.3)
@@ -249,6 +252,9 @@ packages:
 
   '@protobufjs/utf8@1.1.1':
     resolution: {integrity: sha512-oOAWABowe8EAbMyWKM0tYDKi8Yaox52D+HWZhAIJqQXbqe0xI/GV7FhLWqlEKreMkfDjshR5FKgi3mnle0h6Eg==}
+
+  '@pulumi/command@1.2.1':
+    resolution: {integrity: sha512-mutNDIUYP67yCBYOVIidQyxuTwZDY9v/sx9EGbgIv4PXfyfolOKGgGLeoHEbI1lxRwaw2wbTZ3VNIynDnA5VKA==}
 
   '@pulumi/pulumi@3.239.0':
     resolution: {integrity: sha512-3OqN4x1OYgan3LvkiYCQYapm9phYnZzcu3usvovAXcQA3x5N5izHi9lmx0N/NLRsQQswE021ZvTTC2HZrYcqTg==}
@@ -1220,6 +1226,14 @@ snapshots:
   '@protobufjs/pool@1.1.0': {}
 
   '@protobufjs/utf8@1.1.1': {}
+
+  '@pulumi/command@1.2.1(typescript@5.9.3)':
+    dependencies:
+      '@pulumi/pulumi': 3.239.0(typescript@5.9.3)
+    transitivePeerDependencies:
+      - supports-color
+      - ts-node
+      - typescript
 
   '@pulumi/pulumi@3.239.0(typescript@5.9.3)':
     dependencies:

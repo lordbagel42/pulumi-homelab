@@ -9,4 +9,7 @@ export interface LXCDefinition {
 
 	ipAddress: string;
 	gateway?: string;
+
+	category: string;
+	tags?: string[];
 }

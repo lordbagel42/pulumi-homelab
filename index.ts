@@ -3,10 +3,14 @@ import * as pulumi from "@pulumi/pulumi";
 import * as proxmox from "@muhlba91/pulumi-proxmoxve";
 
 import { allVms as vms, allLxcs as lxcs } from "./architecture";
+import { createHashistack } from "./lxcs/hashistack";
 
 const config = new pulumi.Config();
 
-const endpoint = config.requireSecret("PROXMOX_ENDPOINT");
+const isHosted = process.env.HOSTED === "true";
+const endpoint = isHosted
+	? config.requireSecret("PROXMOX_NETBIRD_ENDPOINT")
+	: config.requireSecret("PROXMOX_ENDPOINT");
 
 const provider = new proxmox.Provider("proxmox", {
 	endpoint: endpoint,
@@ -22,6 +26,7 @@ const provider = new proxmox.Provider("proxmox", {
 });
 
 const sshKey = fs.readFileSync("./proxmox-pulumi.pub", "utf-8").trim();
+const sshPrivateKey = config.requireSecret("SSH_PRIVATE_KEY");
 const vmPassword = config.requireSecret("PROXMOX_USER_ACCOUNT_PASSWORD");
 
 const vmCloudInitSnippet = new proxmox.FileLegacy("vm-cloud-init", {
@@ -123,12 +128,16 @@ for (const vm of vms) {
 				type: "l26",
 			},
 
+			tags: [vm.category, ...(vm.tags ?? [])],
+
 			onBoot: true,
 			started: true,
 		},
 		{ provider },
 	);
 }
+
+createHashistack({ provider, vmPassword, sshKey, sshPrivateKey });
 
 for (const lxc of lxcs) {
 	new proxmox.ContainerLegacy(
@@ -176,6 +185,8 @@ for (const lxc of lxcs) {
 					keys: [sshKey],
 				},
 			},
+
+			tags: [lxc.category, ...(lxc.tags ?? [])],
 
 			startOnBoot: true,
 			started: true,

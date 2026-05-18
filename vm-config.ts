@@ -9,4 +9,7 @@ export interface VmDefinition {
 
 	ipAddress: string;
 	gateway?: string;
+
+	category: string;
+	tags?: string[];
 }

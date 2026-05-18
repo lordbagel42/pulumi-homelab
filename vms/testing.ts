@@ -12,5 +12,7 @@ export const testingVms: VmDefinition[] = [
 		diskGb: 8,
 
 		ipAddress: "dhcp",
+
+		category: "testing",
 	},
 ];
