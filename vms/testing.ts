@@ -1,10 +1,10 @@
 import { VmDefinition } from "../vm-config";
 
-// IDs 400–409 (testing range within VM range 400–599)
+// IDs 100–199 (DHCP / ephemeral VMs)
 export const testingVms: VmDefinition[] = [
 	{
 		name: "ubuntu-testing",
-		vmId: 400,
+		vmId: 100,
 		nodeName: "optiplex",
 
 		cpuCores: 2,

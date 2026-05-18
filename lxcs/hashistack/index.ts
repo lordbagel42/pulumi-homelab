@@ -7,8 +7,10 @@ import * as command from "@pulumi/command";
 const CONSUL_VERSION = "1.20.1";
 const NOMAD_VERSION = "1.9.3";
 
-const CONSUL_IP = "192.168.0.190";
-const NOMAD_IP = "192.168.0.191";
+const CONSUL_VMID = 201;
+const NOMAD_VMID = 202;
+const CONSUL_IP = `192.168.0.${CONSUL_VMID}`;
+const NOMAD_IP = `192.168.0.${NOMAD_VMID}`;
 const GATEWAY = "192.168.0.1";
 
 export interface HashistackArgs {
@@ -45,7 +47,7 @@ export function createHashistack({
 		"consul-server",
 		{
 			nodeName: "optiplex",
-			vmId: 190,
+			vmId: CONSUL_VMID,
 
 			cpu: { cores: 1 },
 			memory: { dedicated: 256 },
@@ -89,7 +91,7 @@ export function createHashistack({
 		"nomad-server",
 		{
 			nodeName: "optiplex",
-			vmId: 191,
+			vmId: NOMAD_VMID,
 
 			cpu: { cores: 4 },
 			memory: { dedicated: 8192 },
