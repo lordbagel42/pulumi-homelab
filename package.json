@@ -1,0 +1,12 @@
+{
+    "name": "pulumi-homelab",
+    "main": "index.ts",
+    "devDependencies": {
+        "@types/node": "^18",
+        "typescript": "^5.0.0"
+    },
+    "dependencies": {
+        "@muhlba91/pulumi-proxmoxve": "^8.1.0",
+        "@pulumi/pulumi": "^3.113.0"
+    }
+}
