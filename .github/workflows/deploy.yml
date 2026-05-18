@@ -16,7 +16,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: "22.22.2"
           cache: pnpm
 
       - name: Install dependencies
@@ -26,7 +26,7 @@ jobs:
         run: curl -fsSL https://pkgs.netbird.io/install.sh | sudo bash
 
       - name: Connect Netbird
-        run: sudo netbird up --setup-key ${{ secrets.NB_SETUP_KEY }} --headless
+        run: sudo netbird up --setup-key ${{ secrets.NB_SETUP_KEY }}
 
       - name: Wait for Netbird peer connection
         run: |
