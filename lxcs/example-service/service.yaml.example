@@ -1,0 +1,38 @@
+# Drop this file as "service.yaml" (remove .example) and fill in your values.
+# No other files need to be changed — this service will be auto-discovered.
+#
+# For complex services (multiple containers, Pulumi Outputs, secrets), create
+# an index.ts instead — see lxcs/authentik/index.ts for the pattern.
+
+name: my-service          # Consul service name + Pulumi resource prefix
+vmid: 250                 # Unique Proxmox VMID (check existing ones to avoid conflicts)
+ip: 192.168.0.250         # Static IP (must be unique on the network)
+
+# Resources (all optional — defaults shown)
+cpu: 1
+memory: 512               # MB
+disk: 8                   # GB
+tags: [app]
+
+# LXC options (optional)
+privileged: false
+nesting: false            # set true if you need Docker inside the container
+
+# Setup script (optional — relative to this directory)
+setup:
+  script: setup.sh
+  env:
+    MY_VAR: "some-value"
+    CONSUL_IP: "192.168.0.201"    # available as constant in the framework
+
+# Reverse proxy via Traefik + Consul (optional)
+reverseProxy:
+  domain: my-service.bagelindustries.com
+  port: 8080
+  protected: true         # require Authentik login
+  entrypoint: web
+
+# Wait for these setup commands before running this service's setup
+# (these are the names of commands registered in ctx.commands)
+dependsOn:
+  - consul-setup          # wait for Consul to be ready if you need service registration

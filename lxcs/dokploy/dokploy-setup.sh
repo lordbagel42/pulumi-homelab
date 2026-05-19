@@ -1,12 +1,13 @@
 #!/bin/bash
-# Installs and starts a single-node Consul server.
-# Required env vars: CONSUL_VERSION, CONSUL_IP
+# Installs Consul client (for Traefik service discovery) and Dokploy.
+# Required env vars: CONSUL_VERSION, CONSUL_IP, DOKPLOY_IP
 set -e
 export DEBIAN_FRONTEND=noninteractive
 
 apt-get update -y -qq
-apt-get install -y -qq wget unzip
+apt-get install -y -qq curl wget unzip
 
+# --- Consul client ---
 wget -q -O /tmp/consul.zip "https://releases.hashicorp.com/consul/${CONSUL_VERSION}/consul_${CONSUL_VERSION}_linux_amd64.zip"
 unzip -q -o /tmp/consul.zip -d /tmp
 mv /tmp/consul /usr/local/bin/consul && chmod +x /usr/local/bin/consul
@@ -19,22 +20,37 @@ cat > /etc/consul.d/consul.hcl << CONFEOF
 datacenter = "dc1"
 data_dir   = "/var/lib/consul"
 log_level  = "INFO"
-server     = true
-bootstrap_expect = 1
-ui_config { enabled = true }
-client_addr = "0.0.0.0"
-bind_addr   = "$CONSUL_IP"
-
-connect {
-  enabled = true
-}
+retry_join = ["$CONSUL_IP"]
+bind_addr  = "$DOKPLOY_IP"
 CONFEOF
+
+# Register Dokploy as a service with Traefik tags
+cat > /etc/consul.d/dokploy-service.json << SVCEOF
+{
+  "service": {
+    "name": "dokploy",
+    "address": "$DOKPLOY_IP",
+    "port": 3000,
+    "tags": [
+      "traefik.enable=true",
+      "traefik.http.routers.dokploy.rule=Host(\`dokploy.raygen.dev\`)",
+      "traefik.http.routers.dokploy.entrypoints=web"
+    ],
+    "check": {
+      "http": "http://$DOKPLOY_IP:3000",
+      "interval": "15s",
+      "timeout": "5s",
+      "deregister_critical_service_after": "1m"
+    }
+  }
+}
+SVCEOF
 
 chown -R consul:consul /etc/consul.d /var/lib/consul
 
 cat > /etc/systemd/system/consul.service << 'SVCEOF'
 [Unit]
-Description=Consul
+Description=Consul Agent
 Documentation=https://www.consul.io/
 After=network-online.target
 Wants=network-online.target
@@ -56,23 +72,8 @@ SVCEOF
 systemctl daemon-reload
 systemctl enable consul
 systemctl restart consul
-sleep 3
-chown -R consul:consul /var/lib/consul
 
-cat > /etc/consul.d/consul-ui-service.json << 'SVCDEF'
-{
-  "service": {
-    "name": "consul-ui",
-    "port": 8500,
-    "tags": [
-      "traefik.enable=true",
-      "traefik.http.routers.consul-ui.rule=Host(`consul.bagelindustries.com`)",
-      "traefik.http.routers.consul-ui.entrypoints=web",
-      "traefik.http.routers.consul-ui.middlewares=authentik@consulcatalog",
-      "traefik.http.services.consul-ui.loadbalancer.server.port=8500"
-    ]
-  }
-}
-SVCDEF
-chown consul:consul /etc/consul.d/consul-ui-service.json
-systemctl reload consul
+# --- Dokploy ---
+wget -q -O /tmp/dokploy-install.sh https://dokploy.com/install.sh
+bash /tmp/dokploy-install.sh
+rm /tmp/dokploy-install.sh

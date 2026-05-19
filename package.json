@@ -7,11 +7,14 @@
         "typescript": "^5.0.0"
     },
     "dependencies": {
+        "@infisical/sdk": "^5.0.2",
         "@muhlba91/pulumi-proxmoxve": "^8.1.0",
         "@pulumi/command": "^1.0.0",
         "@pulumi/pulumi": "^3.113.0"
     },
     "pnpm": {
-        "onlyBuiltDependencies": ["@pulumi/command"]
+        "onlyBuiltDependencies": [
+            "@pulumi/command"
+        ]
     }
 }
