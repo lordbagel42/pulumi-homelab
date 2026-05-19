@@ -12,10 +12,12 @@
         "noImplicitReturns": true,
         "forceConsistentCasingInFileNames": true
     },
-    "files": [
-        "index.ts",
-        "architecture.ts",
-        "vm-config.ts",
-        "lxc-config.ts"
+    "include": [
+        "*.ts",
+        "framework/**/*.ts",
+        "infisical/**/*.ts",
+        "lxcs/**/*.ts",
+        "utils/**/*.ts",
+        "vms/**/*.ts"
     ]
 }
