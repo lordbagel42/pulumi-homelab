@@ -10,7 +10,9 @@
         "@infisical/sdk": "^5.0.2",
         "@muhlba91/pulumi-proxmoxve": "^8.1.0",
         "@pulumi/command": "^1.0.0",
-        "@pulumi/pulumi": "^3.113.0"
+        "@pulumi/pulumi": "^3.113.0",
+        "@types/js-yaml": "^4.0.9",
+        "js-yaml": "^4.1.1"
     },
     "pnpm": {
         "onlyBuiltDependencies": [

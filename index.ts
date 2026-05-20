@@ -4,7 +4,7 @@ import * as pulumi from "@pulumi/pulumi";
 import * as proxmox from "@muhlba91/pulumi-proxmoxve";
 
 import { allVms as vms, allLxcs as lxcs } from "./architecture";
-import { InfisicalConfig } from "./infisical";
+import { InfisicalConfig, readSecret } from "./infisical";
 import { discoverAndRegisterAll, ServiceContext } from "./framework";
 
 const config = new pulumi.Config();
@@ -38,9 +38,16 @@ const infisicalConfig: InfisicalConfig = {
     clientSecret: config.requireSecret("INFISICAL_CLIENT_SECRET"),
     projectId: config.requireSecret("INFISICAL_PROJECT_ID"),
     environment: config.get("INFISICAL_ENVIRONMENT") ?? "prod",
-    secretPath: config.get("INFISICAL_SECRET_PATH") ?? "/homelab",
+    secretPath: config.get("INFISICAL_SECRET_PATH") ?? "/proxmox",
     host: config.get("INFISICAL_HOST"),
 };
+
+const oracleInfisicalConfig: InfisicalConfig = { ...infisicalConfig, secretPath: "/oracle" };
+const oraclePublicIp = readSecret("ORACLE_PUBLIC_IP", oracleInfisicalConfig);
+const oraclePrivateKey = readSecret("ORACLE_PRIVATE_KEY", oracleInfisicalConfig);
+const oracleUser = readSecret("ORACLE_USER", oracleInfisicalConfig);
+const oracleCfTunnelToken = readSecret("ORACLE_CLOUDFLARE_TUNNEL_TOKEN", oracleInfisicalConfig);
+const oracleNbIp = readSecret("ORACLE_NB_IP", oracleInfisicalConfig);
 
 const vmCloudInitSnippet = new proxmox.FileLegacy(
     "vm-cloud-init",
@@ -179,6 +186,11 @@ const ctx: ServiceContext = {
     proxmoxEndpoint: endpoint,
     proxmoxUsername: config.requireSecret("PROXMOX_USERNAME"),
     proxmoxPassword: config.requireSecret("PROXMOX_PASSWORD"),
+    oraclePublicIp,
+    oraclePrivateKey,
+    oracleUser,
+    oracleCfTunnelToken,
+    oracleNbIp,
     commands: new Map(),
 };
 

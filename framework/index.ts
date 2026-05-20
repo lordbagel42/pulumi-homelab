@@ -38,6 +38,12 @@ export interface ServiceContext {
     proxmoxEndpoint?: pulumi.Input<string>;
     proxmoxUsername?: pulumi.Input<string>;
     proxmoxPassword?: pulumi.Input<string>;
+    /** Oracle VM extras */
+    oraclePublicIp?: pulumi.Input<string>;
+    oraclePrivateKey?: pulumi.Input<string>;
+    oracleUser?: pulumi.Input<string>;
+    oracleCfTunnelToken?: pulumi.Input<string>;
+    oracleNbIp?: pulumi.Input<string>;
     /** Registry of named commands/resources, populated as services register. */
     commands: Map<string, pulumi.Resource>;
 }

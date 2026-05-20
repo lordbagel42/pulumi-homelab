@@ -14,6 +14,16 @@ export function managedSecret(secretName: string, config: InfisicalConfig): pulu
     return _getOrCreateSecret(secretName, config, `openssl rand -hex 32`, `infisical-secret-${secretName}`);
 }
 
+/** Reads an existing secret; fails hard if not found rather than generating a placeholder. */
+export function readSecret(secretName: string, config: InfisicalConfig): pulumi.Output<string> {
+    return _getOrCreateSecret(
+        secretName,
+        config,
+        `printf 'readSecret: "%s" not found at "%s" (HTTP %s): %s\\n' '${secretName}' '${config.secretPath}' "$STATUS" "$_INFISICAL_BODY" >&2; exit 1`,
+        `read-secret-${secretName}`,
+    );
+}
+
 export function lxcPassword(containerName: string, config: InfisicalConfig): pulumi.Output<string> {
     return _getOrCreateSecret(
         `lxc-root-${containerName}`,
@@ -67,6 +77,7 @@ if [ "$STATUS" = "200" ]; then
     rm -f "$RESP"
     exit 0
 fi
+_INFISICAL_BODY=$(cat "$RESP" 2>/dev/null | head -c 800)
 rm -f "$RESP"
 
 VALUE=$(${generateCmd})
