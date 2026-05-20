@@ -67,14 +67,20 @@ jobs:
 
       - name: Wait for Netbird peer connection
         run: |
+          connected=false
           for i in $(seq 1 30); do
             if sudo netbird status | grep -q "Connected"; then
               echo "Netbird connected"
+              connected=true
               break
             fi
             echo "Waiting for Netbird... ($i/30)"
             sleep 2
           done
+          if [ "$connected" != "true" ]; then
+            echo "::error::Netbird failed to connect after 60 seconds — check NB_SETUP_KEY and peer status"
+            exit 1
+          fi
 
       - uses: pulumi/actions@v6
         with:
