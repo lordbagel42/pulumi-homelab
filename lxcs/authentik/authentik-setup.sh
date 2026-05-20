@@ -217,7 +217,7 @@ from authentik.outposts.models import Outpost
 import os
 
 # Ensure admin user has correct email and password
-admin = User.objects.filter(is_superuser=True).first()
+admin = User.objects.filter(username="akadmin").first()
 if admin:
     admin.email = "raygenrrupe@gmail.com"
     bootstrap_password = os.environ.get("AUTHENTIK_BOOTSTRAP_PASSWORD", "")
