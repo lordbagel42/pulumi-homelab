@@ -217,14 +217,16 @@ from authentik.outposts.models import Outpost
 import os
 
 # Ensure admin user has correct email and password
-admin = User.objects.filter(is_superuser=True).first()
-if admin:
-    admin.email = "raygenrrupe@gmail.com"
-    bootstrap_password = os.environ.get("AUTHENTIK_BOOTSTRAP_PASSWORD", "")
-    if bootstrap_password:
-        admin.set_password(bootstrap_password)
-    admin.save()
-    print(f"Admin user: {admin.username} ({admin.email})")
+admin_username = os.environ.get("AUTHENTIK_BOOTSTRAP_USERNAME", "akadmin")
+admin = User.objects.filter(username=admin_username).first()
+if not admin:
+    print(f"ERROR: Admin user '{admin_username}' not found"); exit(1)
+admin.email = "raygenrrupe@gmail.com"
+bootstrap_password = os.environ.get("AUTHENTIK_BOOTSTRAP_PASSWORD", "")
+if bootstrap_password:
+    admin.set_password(bootstrap_password)
+admin.save()
+print(f"Admin user: {admin.username} ({admin.email})")
 
 flow = Flow.objects.filter(designation=FlowDesignation.AUTHENTICATION).first()
 if not flow:

@@ -26,7 +26,7 @@ for i in $(seq 1 40); do
   echo "  attempt $i/40..."
   sleep 5
 done
-ssh -i "$key" -o StrictHostKeyChecking=no root@${host} "${remoteEnv} bash -s" < "${scriptPath}"
+ssh -i "$key" -o StrictHostKeyChecking=no -o BatchMode=yes -o ConnectTimeout=30 -o ServerAliveInterval=60 -o ServerAliveCountMax=10 root@${host} "${remoteEnv} bash -s" < "${scriptPath}"
 rc=$?
 rm -f "$key"
 exit $rc

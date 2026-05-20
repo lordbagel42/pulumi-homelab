@@ -74,6 +74,10 @@ systemctl enable consul
 systemctl restart consul
 
 # --- Dokploy ---
-wget -q -O /tmp/dokploy-install.sh https://dokploy.com/install.sh
-bash /tmp/dokploy-install.sh
-rm /tmp/dokploy-install.sh
+if docker service inspect dokploy >/dev/null 2>&1; then
+    echo "Dokploy already installed, skipping..."
+else
+    wget -q -O /tmp/dokploy-install.sh https://dokploy.com/install.sh
+    bash /tmp/dokploy-install.sh
+    rm /tmp/dokploy-install.sh
+fi
