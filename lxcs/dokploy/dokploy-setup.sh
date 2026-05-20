@@ -74,7 +74,7 @@ systemctl enable consul
 systemctl restart consul
 
 # --- Dokploy ---
-if docker service ls 2>/dev/null | grep -q 'dokploy'; then
+if docker service inspect dokploy >/dev/null 2>&1; then
     echo "Dokploy already installed, skipping..."
 else
     wget -q -O /tmp/dokploy-install.sh https://dokploy.com/install.sh
