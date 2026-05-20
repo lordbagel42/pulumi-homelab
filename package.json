@@ -16,7 +16,8 @@
     },
     "pnpm": {
         "onlyBuiltDependencies": [
-            "@pulumi/command"
+            "@pulumi/command",
+            "protobufjs"
         ]
     }
 }
