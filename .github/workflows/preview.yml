@@ -61,7 +61,12 @@ jobs:
       - name: Connect Netbird
         env:
           NB_SETUP_KEY: ${{ secrets.NB_SETUP_KEY }}
-        run: sudo --preserve-env=NB_SETUP_KEY netbird up --setup-key "$NB_SETUP_KEY"
+        run: |
+          if [ -z "$NB_SETUP_KEY" ]; then
+            echo "::error::NB_SETUP_KEY secret is not set — add it under Settings → Secrets → Actions"
+            exit 1
+          fi
+          sudo netbird up --setup-key "$NB_SETUP_KEY"
 
       - name: Wait for Netbird peer connection
         run: |
