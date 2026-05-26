@@ -101,10 +101,12 @@ cat > /etc/nomad.d/nomad.hcl << 'NOMADEOF'
 datacenter = "dc1"
 data_dir   = "/var/lib/nomad"
 log_level  = "INFO"
+name       = "nomad-client"
 
 client {
-  enabled  = true
-  cni_path = "/opt/cni/bin"
+  enabled    = true
+  cni_path   = "/opt/cni/bin"
+  node_class = "homelab"
 }
 
 consul {

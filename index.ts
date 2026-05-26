@@ -6,6 +6,7 @@ import * as proxmox from "@muhlba91/pulumi-proxmoxve";
 import { allVms as vms, allLxcs as lxcs } from "./architecture";
 import { InfisicalConfig, readSecret } from "./infisical";
 import { discoverAndRegisterAll, ServiceContext } from "./framework";
+import type { GrafanaConfig } from "./utils/alloy";
 
 const config = new pulumi.Config();
 
@@ -42,12 +43,25 @@ const infisicalConfig: InfisicalConfig = {
     host: config.get("INFISICAL_HOST"),
 };
 
+const grafanaInfisicalConfig: InfisicalConfig = { ...infisicalConfig, secretPath: "/grafana" };
+const grafana: GrafanaConfig = {
+    logsUrl:       readSecret("GCLOUD_HOSTED_LOGS_URL",    grafanaInfisicalConfig),
+    logsId:        readSecret("GCLOUD_HOSTED_LOGS_ID",     grafanaInfisicalConfig),
+    metricsUrl:    readSecret("GCLOUD_HOSTED_METRICS_URL", grafanaInfisicalConfig),
+    metricsId:     readSecret("GCLOUD_HOSTED_METRICS_ID",  grafanaInfisicalConfig),
+    apiKey:        readSecret("GCLOUD_RW_API_KEY",         grafanaInfisicalConfig),
+    scrapeInterval: readSecret("GCLOUD_SCRAPE_INTERVAL",   grafanaInfisicalConfig),
+};
+
 const oracleInfisicalConfig: InfisicalConfig = { ...infisicalConfig, secretPath: "/oracle" };
 const oraclePublicIp = readSecret("ORACLE_PUBLIC_IP", oracleInfisicalConfig);
 const oraclePrivateKey = readSecret("ORACLE_PRIVATE_KEY", oracleInfisicalConfig);
 const oracleUser = readSecret("ORACLE_USER", oracleInfisicalConfig);
 const oracleCfTunnelToken = readSecret("ORACLE_CLOUDFLARE_TUNNEL_TOKEN", oracleInfisicalConfig);
 const oracleNbIp = readSecret("ORACLE_NB_IP", oracleInfisicalConfig);
+const oraclePelicanAppKey = readSecret("PELICAN_APP_KEY", oracleInfisicalConfig);
+const oraclePelicanDbPass = readSecret("PELICAN_DB_PASSWORD", oracleInfisicalConfig);
+const oraclePelicanDbRootPass = readSecret("PELICAN_DB_ROOT_PASSWORD", oracleInfisicalConfig);
 
 const vmCloudInitSnippet = new proxmox.FileLegacy(
     "vm-cloud-init",
@@ -80,6 +94,8 @@ runcmd:
   - systemctl enable --now qemu-guest-agent
   - sed -i '/PermitRootLogin/d' /etc/ssh/sshd_config
   - echo 'PermitRootLogin prohibit-password' >> /etc/ssh/sshd_config
+  - sed -i '/^#\?UseDNS/d' /etc/ssh/sshd_config
+  - echo 'UseDNS no' >> /etc/ssh/sshd_config
   - systemctl restart sshd
 `,
         },
@@ -176,6 +192,7 @@ for (const lxc of lxcs) {
 const ctx: ServiceContext = {
     provider,
     infisicalConfig,
+    grafana,
     sshKey,
     sshPrivateKey,
     vmPassword,
@@ -191,6 +208,9 @@ const ctx: ServiceContext = {
     oracleUser,
     oracleCfTunnelToken,
     oracleNbIp,
+    oraclePelicanAppKey,
+    oraclePelicanDbPass,
+    oraclePelicanDbRootPass,
     commands: new Map(),
 };
 

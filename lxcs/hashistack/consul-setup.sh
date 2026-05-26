@@ -59,20 +59,23 @@ systemctl restart consul
 sleep 3
 chown -R consul:consul /var/lib/consul
 
-cat > /etc/consul.d/consul-ui-service.json << 'SVCDEF'
-{
-  "service": {
-    "name": "consul-ui",
-    "port": 8500,
-    "tags": [
-      "traefik.enable=true",
-      "traefik.http.routers.consul-ui.rule=Host(`consul.bagelindustries.com`)",
-      "traefik.http.routers.consul-ui.entrypoints=web",
-      "traefik.http.routers.consul-ui.middlewares=authentik@consulcatalog",
-      "traefik.http.services.consul-ui.loadbalancer.server.port=8500"
-    ]
-  }
-}
-SVCDEF
-chown consul:consul /etc/consul.d/consul-ui-service.json
-systemctl reload consul
+# Persistent route so homelab can reach oracle's NetBird IP (100.64.0.0/10 via optiplex)
+cat > /etc/systemd/system/netbird-route.service << 'ROUTEOF'
+[Unit]
+Description=Add NetBird route via optiplex
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/sbin/ip route replace 100.64.0.0/10 via 192.168.0.10
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+ROUTEOF
+
+systemctl daemon-reload
+systemctl enable netbird-route
+systemctl start netbird-route
+

@@ -33,6 +33,7 @@ providers:
   consulCatalog:
     prefix: traefik
     exposedByDefault: false
+    constraints: "!Tag(\`oracle\`)"
     endpoint:
       address: "${CONSUL_IP}:8500"
 

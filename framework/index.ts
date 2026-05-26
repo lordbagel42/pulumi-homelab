@@ -5,6 +5,8 @@ import * as proxmox from "@muhlba91/pulumi-proxmoxve";
 import * as command from "@pulumi/command";
 import { InfisicalConfig, lxcPassword } from "../infisical";
 import { sshSetup } from "../utils/ssh";
+import type { GrafanaConfig } from "../utils/alloy";
+export type { GrafanaConfig } from "../utils/alloy";
 
 // js-yaml is available as a transitive dep of @pulumi/pulumi
 // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -44,6 +46,11 @@ export interface ServiceContext {
     oracleUser?: pulumi.Input<string>;
     oracleCfTunnelToken?: pulumi.Input<string>;
     oracleNbIp?: pulumi.Input<string>;
+    oraclePelicanAppKey?: pulumi.Output<string>;
+    oraclePelicanDbPass?: pulumi.Output<string>;
+    oraclePelicanDbRootPass?: pulumi.Output<string>;
+    /** Grafana Cloud credentials for Alloy log/metric shipping. */
+    grafana?: GrafanaConfig;
     /** Registry of named commands/resources, populated as services register. */
     commands: Map<string, pulumi.Resource>;
 }

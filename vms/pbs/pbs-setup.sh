@@ -33,28 +33,38 @@ for i in $(seq 1 40); do
   sleep 5
 done
 
-# Wait for data disk to appear (scsi1 = /dev/sdb)
-echo "Waiting for data disk /dev/sdb..."
-for i in $(seq 1 30); do
-  if [ -b /dev/sdb ]; then
-    echo "Data disk found"
+# Detect the data disk: the largest unpartitioned block device that is not the boot disk
+BOOT_DEV=$(lsblk -no PKNAME $(findmnt -n -o SOURCE /) 2>/dev/null | head -1)
+DATA_DISK=""
+for dev in /dev/sd?; do
+  name=$(basename "$dev")
+  [ "$name" = "$BOOT_DEV" ] && continue
+  parts=$(lsblk -n -o TYPE "$dev" 2>/dev/null | grep -c '^part' || true)
+  if [ "$parts" -eq 0 ]; then
+    DATA_DISK="$dev"
     break
   fi
-  sleep 2
 done
+
+if [ -z "$DATA_DISK" ]; then
+  echo "ERROR: no unpartitioned data disk found" >&2
+  lsblk >&2
+  exit 1
+fi
+echo "Data disk: $DATA_DISK"
 
 # Partition, format, and mount the HDD (idempotent)
 if mountpoint -q /mnt/pbs-storage 2>/dev/null; then
   echo "Data disk already mounted, skipping format"
 else
-  umount /dev/sdb1 2>/dev/null || true
-  wipefs -a /dev/sdb
-  parted -s /dev/sdb mklabel gpt
-  parted -s /dev/sdb mkpart primary ext4 0% 100%
+  umount "${DATA_DISK}1" 2>/dev/null || true
+  wipefs -a "$DATA_DISK"
+  parted -s "$DATA_DISK" mklabel gpt
+  parted -s "$DATA_DISK" mkpart primary ext4 0% 100%
   sleep 2
-  mkfs.ext4 -q -F /dev/sdb1
+  mkfs.ext4 -q -F "${DATA_DISK}1"
   mkdir -p /mnt/pbs-storage
-  grep -q '/dev/sdb1' /etc/fstab || echo '/dev/sdb1 /mnt/pbs-storage ext4 defaults 0 0' >> /etc/fstab
+  grep -q "${DATA_DISK}1" /etc/fstab || echo "${DATA_DISK}1 /mnt/pbs-storage ext4 defaults 0 0" >> /etc/fstab
   mount /mnt/pbs-storage
 fi
 

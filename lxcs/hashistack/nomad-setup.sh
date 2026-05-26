@@ -114,6 +114,26 @@ systemctl daemon-reload
 systemctl enable nomad
 systemctl restart nomad
 
+# Persistent route so homelab can reach oracle's NetBird IP (100.64.0.0/10 via optiplex)
+cat > /etc/systemd/system/netbird-route.service << 'ROUTEOF'
+[Unit]
+Description=Add NetBird route via optiplex
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/sbin/ip route replace 100.64.0.0/10 via 192.168.0.10
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+ROUTEOF
+
+systemctl daemon-reload
+systemctl enable netbird-route
+systemctl start netbird-route
+
 cat > /etc/consul.d/nomad-ui-service.json << 'SVCDEF'
 {
   "service": {

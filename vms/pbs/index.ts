@@ -12,14 +12,47 @@ export const dependencies: string[] = [];
 
 export function register(ctx: ServiceContext): void {
     if (!ctx.pbsBackupPassword || !ctx.proxmoxEndpoint || !ctx.proxmoxUsername || !ctx.proxmoxPassword) {
-        throw new Error("PBS requires pbsBackupPassword, proxmoxEndpoint, proxmoxUsername, proxmoxPassword in ServiceContext");
+        throw new Error("pbs module requires pbsBackupPassword, proxmoxEndpoint, proxmoxUsername, proxmoxPassword in ServiceContext");
     }
+
+    // inspiron's local storage is not shared with optiplex — download the cloud
+    // image directly to inspiron so the disk import stays node-local.
+    const pbsCloudImage = new proxmox.download.File("pbs-cloud-image", {
+        contentType: "import",
+        datastoreId: "local",
+        nodeName: "inspiron",
+        url: "https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-genericcloud-amd64.qcow2",
+        fileName: "debian-12-genericcloud-amd64.qcow2",
+    }, { provider: ctx.provider });
+
+    const pbsCloudInit = new proxmox.FileLegacy("pbs-cloud-init", {
+        contentType: "snippets",
+        datastoreId: "local",
+        nodeName: "inspiron",
+        sourceRaw: {
+            fileName: "pbs-cloud-init.yaml",
+            data: `#cloud-config
+users:
+  - name: root
+    ssh_authorized_keys:
+      - ${ctx.sshKey}
+packages:
+  - qemu-guest-agent
+runcmd:
+  - systemctl enable --now qemu-guest-agent
+  - sed -i '/PermitRootLogin/d' /etc/ssh/sshd_config
+  - echo 'PermitRootLogin prohibit-password' >> /etc/ssh/sshd_config
+  - systemctl restart sshd
+`,
+        },
+    }, { provider: ctx.provider });
+
     createPbs({
         provider: ctx.provider,
         sshKey: ctx.sshKey,
         sshPrivateKey: ctx.sshPrivateKey,
-        debianCloudImageId: ctx.debianCloudImageId,
-        cloudInitSnippetId: ctx.cloudInitSnippetId,
+        debianCloudImageId: pbsCloudImage.id,
+        cloudInitSnippetId: pbsCloudInit.id,
         pbsBackupPassword: pulumi.output(ctx.pbsBackupPassword),
         proxmoxEndpoint: pulumi.output(ctx.proxmoxEndpoint),
         proxmoxUsername: pulumi.output(ctx.proxmoxUsername),
@@ -72,7 +105,7 @@ export function createPbs({
 	const pbsScriptPath = path.join(__dirname, "pbs-setup.sh");
 
 	const pbsVm = new proxmox.VmLegacy("proxmox-backup-server", {
-		nodeName: "optiplex",
+		nodeName: "inspiron",
 		vmId: PBS_VMID,
 		name: "proxmox-backup-server",
 
@@ -86,7 +119,7 @@ export function createPbs({
 
 		cpu: {
 			cores: 2,
-			type: "x86-64-v2-AES",
+			type: "host",
 		},
 
 		memory: {
@@ -103,7 +136,7 @@ export function createPbs({
 				ssd: true,
 			},
 			{
-				datastoreId: "hdd",
+				datastoreId: "local-lvm",
 				interface: "scsi1",
 				size: 400,
 			},
@@ -209,8 +242,7 @@ curl -sf -k -X POST "$ENDPOINT/api2/json/storage" \\
     --data-urlencode "username=root@pam" \\
     --data-urlencode "password=$_PBS_PASS" \\
     --data-urlencode "fingerprint=${pbsFingerprint.stdout.apply(s => s.trim())}" \\
-    --data-urlencode "content=backup" \\
-    --data-urlencode "nodes=optiplex" > /dev/null
+    --data-urlencode "content=backup" > /dev/null
 		`.apply(s => s.trim()),
 		delete: pulumi.interpolate`
 ${pveApiScript("$_PVE_ENDPOINT")}
@@ -240,6 +272,7 @@ curl -sf -k -X POST "$ENDPOINT/api2/json/cluster/backup" \\
     --data-urlencode "storage=${PBS_STORAGE_ID}" \\
     --data-urlencode "schedule=*-*-* 02:00" \\
     --data-urlencode "all=1" \\
+    --data-urlencode "exclude=100" \\
     --data-urlencode "mode=snapshot" \\
     --data-urlencode "compress=zstd" \\
     --data-urlencode "prune-backups=keep-daily=7,keep-weekly=4,keep-monthly=3" > /dev/null
