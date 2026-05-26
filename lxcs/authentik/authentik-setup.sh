@@ -122,8 +122,6 @@ services:
       AUTHENTIK_BOOTSTRAP_TOKEN: ${AUTHENTIK_BOOTSTRAP_TOKEN}
       AUTHENTIK_BOOTSTRAP_EMAIL: ${AUTHENTIK_BOOTSTRAP_EMAIL}
       AUTHENTIK_ERROR_REPORTING__ENABLED: "false"
-      AUTHENTIK_HOST: "http://auth.bagelindustries.com"
-      AUTHENTIK_LISTEN__TRUSTED_PROXY_CIDRS: "192.168.0.0/16"
     volumes:
       - media:/media
       - custom-templates:/templates
@@ -198,6 +196,14 @@ from authentik.outposts.models import Outpost
 flow = Flow.objects.filter(designation=FlowDesignation.AUTHENTICATION).first()
 outpost = Outpost.objects.filter(name__icontains='embedded').first()
 
+# Configure embedded outpost to redirect browsers to the public URL
+config = outpost.config
+config.authentik_host = 'https://auth.bagelindustries.com'
+config.authentik_host_browser = 'https://auth.bagelindustries.com'
+outpost.config = config
+outpost.save()
+print(f'Outpost host configured: {outpost.config.authentik_host}')
+
 apps = [
     ('Nomad UI',  'nomad-ui',  'https://nomad.bagelindustries.com'),
     ('Consul UI', 'consul-ui', 'https://consul.bagelindustries.com'),
@@ -219,4 +225,57 @@ for name, slug, host in apps:
 print('Bootstrap complete')
 "
 echo "Authentik bootstrap complete"
+
+# --- Bootstrap passwordless (WebAuthn) login ---
+echo "Bootstrapping passwordless login..."
+docker exec authentik-server-1 ak shell -c "
+from authentik.stages.identification.models import IdentificationStage, UserFields
+from authentik.stages.authenticator_webauthn.models import AuthenticatorWebAuthnStage, UserVerification
+from authentik.stages.authenticator_validate.models import AuthenticatorValidateStage, DeviceClasses, NotConfiguredAction
+from authentik.stages.user_login.models import UserLoginStage
+from authentik.flows.models import Flow, FlowDesignation, FlowStageBinding
+
+login_stage = UserLoginStage.objects.get(name='default-authentication-login')
+
+webauthn_setup, _ = AuthenticatorWebAuthnStage.objects.get_or_create(
+    name='webauthn-setup',
+    defaults={'user_verification': UserVerification.PREFERRED}
+)
+
+webauthn_validate, _ = AuthenticatorValidateStage.objects.get_or_create(
+    name='webauthn-passwordless-validate',
+    defaults={
+        'device_classes': [DeviceClasses.WEBAUTHN],
+        'not_configured_action': NotConfiguredAction.CONFIGURE,
+    }
+)
+webauthn_validate.configuration_stages.add(webauthn_setup)
+webauthn_validate.device_classes = [DeviceClasses.WEBAUTHN]
+webauthn_validate.save()
+
+pl_id_stage, _ = IdentificationStage.objects.get_or_create(
+    name='passwordless-identification',
+    defaults={'user_fields': [UserFields.USERNAME, UserFields.E_MAIL]}
+)
+
+pl_flow, _ = Flow.objects.get_or_create(
+    slug='passwordless-authentication',
+    defaults={
+        'name': 'Passwordless Authentication',
+        'title': 'Sign in with Passkey',
+        'designation': FlowDesignation.AUTHENTICATION,
+    }
+)
+
+FlowStageBinding.objects.get_or_create(target=pl_flow, stage=pl_id_stage, defaults={'order': 10})
+FlowStageBinding.objects.get_or_create(target=pl_flow, stage=webauthn_validate, defaults={'order': 20})
+FlowStageBinding.objects.get_or_create(target=pl_flow, stage=login_stage, defaults={'order': 30})
+
+main_id = IdentificationStage.objects.get(name='default-authentication-identification')
+main_id.passwordless_flow = pl_flow
+main_id.save()
+
+print('Passwordless login configured:', pl_flow.slug)
+"
+echo "Passwordless bootstrap complete"
 
