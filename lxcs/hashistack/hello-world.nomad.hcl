@@ -1,5 +1,5 @@
 job "hello-world" {
-  datacenters = ["dc1"]
+  datacenters = ["homelab"]
   type        = "service"
 
   group "web" {

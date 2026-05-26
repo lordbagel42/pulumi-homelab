@@ -1,11 +1,6 @@
 job "oracle-traefik" {
-  datacenters = ["dc1"]
+  datacenters = ["oracle"]
   type        = "service"
-
-  constraint {
-    attribute = "${node.class}"
-    value     = "oracle"
-  }
 
   group "traefik" {
     count = 1

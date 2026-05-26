@@ -4,7 +4,7 @@ variable "image" {
 }
 
 job "sveltekit-nomad" {
-  datacenters = ["dc1"]
+  datacenters = ["homelab"]
   type        = "service"
 
   group "web" {

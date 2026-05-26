@@ -17,7 +17,7 @@ useradd -r -d /etc/consul.d -s /sbin/nologin consul 2>/dev/null || true
 mkdir -p /etc/consul.d /var/lib/consul
 
 cat > /etc/consul.d/consul.hcl << CONFEOF
-datacenter = "dc1"
+datacenter = "homelab"
 data_dir   = "/var/lib/consul"
 log_level  = "INFO"
 retry_join = ["$CONSUL_IP"]
@@ -71,7 +71,7 @@ useradd -r -d /etc/nomad.d -s /sbin/nologin nomad 2>/dev/null || true
 mkdir -p /etc/nomad.d /var/lib/nomad
 
 cat > /etc/nomad.d/nomad.hcl << 'NOMADEOF'
-datacenter = "dc1"
+datacenter = "homelab"
 data_dir   = "/var/lib/nomad"
 log_level  = "INFO"
 

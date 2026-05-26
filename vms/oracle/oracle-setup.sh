@@ -31,7 +31,7 @@ useradd -r -d /etc/consul.d -s /sbin/nologin consul 2>/dev/null || true
 mkdir -p /etc/consul.d /var/lib/consul
 
 cat > /etc/consul.d/consul.hcl << CONFEOF
-datacenter = "dc1"
+datacenter = "homelab"
 data_dir   = "/var/lib/consul"
 log_level  = "INFO"
 retry_join = ["$CONSUL_IP"]
@@ -101,7 +101,7 @@ CPU_CORES=$(nproc)
 CPU_TOTAL=$((CPU_MHZ * CPU_CORES))
 
 cat > /etc/nomad.d/nomad.hcl << NOMADEOF
-datacenter = "dc1"
+datacenter = "oracle"
 data_dir   = "/var/lib/nomad"
 log_level  = "INFO"
 name       = "oracle"
@@ -118,7 +118,6 @@ advertise {
 
 client {
   enabled           = true
-  node_class        = "oracle"
   cpu_total_compute = $CPU_TOTAL
   cni_path          = "/opt/cni/bin"
 

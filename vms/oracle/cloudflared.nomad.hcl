@@ -1,11 +1,6 @@
 job "oracle-cloudflared" {
-  datacenters = ["dc1"]
+  datacenters = ["oracle"]
   type        = "service"
-
-  constraint {
-    attribute = "${node.class}"
-    value     = "oracle"
-  }
 
   group "cloudflared" {
     count = 1

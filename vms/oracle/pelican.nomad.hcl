@@ -1,11 +1,6 @@
 job "oracle-pelican" {
-  datacenters = ["dc1"]
+  datacenters = ["oracle"]
   type        = "service"
-
-  constraint {
-    attribute = "${node.class}"
-    value     = "oracle"
-  }
 
   group "pelican" {
     count = 1
