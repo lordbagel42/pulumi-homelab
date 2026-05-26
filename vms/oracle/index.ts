@@ -1,3 +1,4 @@
+import * as crypto from "crypto";
 import * as fs from "fs";
 import * as path from "path";
 import * as pulumi from "@pulumi/pulumi";
@@ -81,4 +82,31 @@ exit $rc
                 .replace("__CF_TOKEN__", token)
         ),
     }, jobOpts);
+
+    // ── Alloy observability on oracle VM ───────────────────────────────────────
+    if (ctx.grafana) {
+        const g = ctx.grafana;
+        const alloyScriptPath = path.join(__dirname, "../../utils/alloy-setup.sh");
+        const alloyScriptHash = crypto.createHash("sha256").update(fs.readFileSync(alloyScriptPath)).digest("hex");
+
+        new command.local.Command("oracle-alloy", {
+            triggers: [alloyScriptHash],
+            create: pulumi.interpolate`
+key=$(mktemp)
+chmod 600 "$key"
+printf '%s\n' "$_SSH_KEY" > "$key"
+scp -i "$key" -o StrictHostKeyChecking=no "${alloyScriptPath}" "$_USER@$_HOST":/tmp/alloy-setup.sh
+ssh -i "$key" -o StrictHostKeyChecking=no "$_USER@$_HOST" \
+  "ALLOY_NODE_LABEL=oracle GCLOUD_HOSTED_LOGS_URL=${g.logsUrl} GCLOUD_HOSTED_LOGS_ID=${g.logsId} GCLOUD_HOSTED_METRICS_URL=${g.metricsUrl} GCLOUD_HOSTED_METRICS_ID=${g.metricsId} GCLOUD_RW_API_KEY=${g.apiKey} GCLOUD_SCRAPE_INTERVAL=${g.scrapeInterval} sudo -E bash /tmp/alloy-setup.sh"
+rc=$?
+rm -f "$key"
+exit $rc
+            `.apply(s => s.trim()),
+            environment: {
+                _SSH_KEY: pulumi.output(ctx.oraclePrivateKey),
+                _HOST: pulumi.output(ctx.oraclePublicIp),
+                _USER: pulumi.output(ctx.oracleUser),
+            },
+        }, { dependsOn: [setupCmd] });
+    }
 }

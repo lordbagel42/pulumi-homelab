@@ -152,7 +152,7 @@ for (const vm of vms) {
             onBoot: true,
             started: true,
         },
-        { provider },
+        { provider, ignoreChanges: ["disks"] },
     );
 }
 

@@ -266,7 +266,7 @@ exit $rc
         tags: ["hashistack", "system"],
         onBoot: true,
         started: true,
-    }, { provider });
+    }, { provider, ignoreChanges: ["disks"] });
 
     const nomadClientSetup = sshSetupUtil("nomad-client-setup", NOMAD_CLIENT_IP, nomadClientScriptPath, {
         CONSUL_VERSION,

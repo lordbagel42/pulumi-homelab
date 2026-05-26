@@ -43,6 +43,8 @@ providers:
 
 log:
   level: INFO
+
+accessLog: {}
 CONFEOF
 
 chown -R traefik:traefik /etc/traefik

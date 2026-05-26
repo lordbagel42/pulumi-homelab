@@ -167,7 +167,7 @@ export function createPbs({
 
 		onBoot: true,
 		started: true,
-	}, { provider });
+	}, { provider, ignoreChanges: ["disks"] });
 
 	const pbsSetup = new command.local.Command("pbs-setup", {
 		create: `
