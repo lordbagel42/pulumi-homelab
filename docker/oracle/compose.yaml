@@ -1,0 +1,32 @@
+services:
+  traefik:
+    image: traefik:v${TRAEFIK_VERSION}
+    container_name: traefik
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - /etc/traefik:/etc/traefik:ro
+
+  discopanel:
+    image: nickheyer/discopanel:latest
+    container_name: discopanel
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /app/data:/app/data
+      - /app/backups:/app/backups
+      - /app/tmp:/app/tmp
+    environment:
+      - DISCOPANEL_DATA_DIR=/app/data
+      - DISCOPANEL_HOST_DATA_PATH=/app/data
+      - TZ=UTC
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: cloudflared
+    restart: unless-stopped
+    network_mode: host
+    command: tunnel --no-autoupdate run --token ${ORACLE_CF_TUNNEL_TOKEN}

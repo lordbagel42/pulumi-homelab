@@ -2,10 +2,12 @@ import * as path from "path";
 import * as pulumi from "@pulumi/pulumi";
 import * as proxmox from "@muhlba91/pulumi-proxmoxve";
 import * as command from "@pulumi/command";
+import * as consul from "@pulumi/consul";
 import { InfisicalConfig, lxcPassword } from "../../infisical";
 import { sshSetup as sshSetupUtil } from "../../utils/ssh";
 import { ip, GATEWAY, CONSUL_VERSION as CONSUL_VER, NOMAD_VERSION as NOMAD_VER, TRAEFIK_VERSION as TRAEFIK_VER } from "../../framework";
 import type { ServiceContext } from "../../framework";
+import { installAlloy } from "../../utils/alloy";
 
 // Re-export for backward compat (other modules import these from here)
 export const CONSUL_VERSION = CONSUL_VER;
@@ -42,6 +44,16 @@ export function register(ctx: ServiceContext): void {
         cloudInitSnippetId: ctx.cloudInitSnippetId,
         cloudflaredTunnelToken: ctx.cloudflaredTunnelToken,
     }, ctx.commands);
+
+    if (!ctx.grafana) return;
+    const g = ctx.grafana;
+    const key = ctx.sshPrivateKey;
+
+    installAlloy("consul",        CONSUL_IP,       "consul",        g, key, [ctx.commands.get("consul-setup")!]);
+    installAlloy("nomad-server",  NOMAD_IP,        "nomad-server",  g, key, [ctx.commands.get("nomad-setup")!]);
+    installAlloy("traefik",       TRAEFIK_IP,      "traefik",       g, key, [ctx.commands.get("traefik-setup")!]);
+    installAlloy("cloudflared",   CLOUDFLARED_IP,  "cloudflared",   g, key, [ctx.commands.get("cloudflared-setup")!]);
+    installAlloy("nomad-client",  NOMAD_CLIENT_IP, "nomad-client",  g, key, [ctx.commands.get("nomad-client-setup")!]);
 }
 
 // ── Legacy interface (kept for any direct callers) ─────────────────────────────
@@ -98,6 +110,32 @@ export function createHashistack(
         CONSUL_VERSION,
     }, sshPrivateKey, [consulContainer]);
     commands?.set("consul-setup", consulSetup);
+
+    const consulProvider = new consul.Provider("consul", {
+        address: `${CONSUL_IP}:8500`,
+        scheme: "http",
+    }, { dependsOn: [consulSetup] });
+
+    const pulumi_services_node = new consul.Node("pulumi-services", {
+        name: "pulumi-services",
+        address: "127.0.0.1",
+    }, { provider: consulProvider });
+    commands?.set("consul-node", pulumi_services_node);
+
+    new consul.Service("consul-ui", {
+        name: "consul-ui",
+        node: "pulumi-services",
+        address: CONSUL_IP,
+        port: 8500,
+        tags: [
+            "traefik.enable=true",
+            `traefik.http.routers.consul-ui.rule=Host(\`consul.bagelindustries.com\`)`,
+            "traefik.http.routers.consul-ui.entrypoints=web",
+            "traefik.http.routers.consul-ui.middlewares=authentik@consulcatalog",
+            "traefik.http.services.consul-ui.loadbalancer.server.port=8500",
+        ],
+    }, { provider: consulProvider, dependsOn: [pulumi_services_node] });
+    commands?.set("consul-provider", consulProvider);
 
     const nomadContainer = new proxmox.ContainerLegacy("nomad-server", {
         nodeName: "optiplex",
@@ -158,8 +196,8 @@ export function createHashistack(
     const cloudflaredContainer = new proxmox.ContainerLegacy("cloudflared", {
         nodeName: "optiplex",
         vmId: CLOUDFLARED_VMID,
-        cpu: { cores: 1 },
-        memory: { dedicated: 128 },
+        cpu: { cores: 2 },
+        memory: { dedicated: 1024 },
         disk: { datastoreId: "local-lvm", size: 2 },
         operatingSystem: {
             templateFileId: "local:vztmpl/debian-13-standard_13.1-2_amd64.tar.zst",

@@ -1,3 +1,5 @@
+import * as crypto from "crypto";
+import * as fs from "fs";
 import * as pulumi from "@pulumi/pulumi";
 import * as command from "@pulumi/command";
 
@@ -13,6 +15,8 @@ export function sshSetup(
         .map(([k, v]) => `${k}=${v}`)
         .join(" ");
 
+    const scriptHash = crypto.createHash("sha256").update(fs.readFileSync(scriptPath)).digest("hex");
+
     return new command.local.Command(name, {
         create: `
 key=$(mktemp)
@@ -26,11 +30,13 @@ for i in $(seq 1 40); do
   echo "  attempt $i/40..."
   sleep 5
 done
+ssh -i "$key" -o StrictHostKeyChecking=no root@${host} "sed -i '/^#\\?UseDNS/d' /etc/ssh/sshd_config && echo 'UseDNS no' >> /etc/ssh/sshd_config && systemctl restart ssh || true"
 ssh -i "$key" -o StrictHostKeyChecking=no root@${host} "${remoteEnv} bash -s" < "${scriptPath}"
 rc=$?
 rm -f "$key"
 exit $rc
         `.trim(),
+        triggers: [scriptHash],
         environment: {
             _SSH_KEY: sshPrivateKey,
         },

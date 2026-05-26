@@ -35,25 +35,6 @@ retry_join = ["$CONSUL_IP"]
 bind_addr  = "$AUTHENTIK_IP"
 CONFEOF
 
-# Authentik service + forwardAuth middleware definition for Traefik
-cat > /etc/consul.d/authentik-service.json << SVCDEF
-{
-  "service": {
-    "name": "authentik",
-    "port": 9000,
-    "tags": [
-      "traefik.enable=true",
-      "traefik.http.routers.authentik.rule=Host(\`authentik.bagelindustries.com\`)",
-      "traefik.http.routers.authentik.entrypoints=web",
-      "traefik.http.services.authentik.loadbalancer.server.port=9000",
-      "traefik.http.middlewares.authentik.forwardauth.address=http://$AUTHENTIK_IP:9000/outpost.goauthentik.io/auth/traefik",
-      "traefik.http.middlewares.authentik.forwardauth.trustForwardHeader=true",
-      "traefik.http.middlewares.authentik.forwardauth.authResponseHeaders=X-authentik-username,X-authentik-groups,X-authentik-email,X-authentik-uid,X-authentik-jwt,X-authentik-meta-jwks,X-authentik-meta-outpost,X-authentik-meta-provider,X-authentik-meta-app,X-authentik-meta-version"
-    ]
-  }
-}
-SVCDEF
-
 chown -R consul:consul /etc/consul.d /var/lib/consul
 
 cat > /etc/systemd/system/consul.service << 'SVCEOF'
@@ -141,6 +122,8 @@ services:
       AUTHENTIK_BOOTSTRAP_TOKEN: ${AUTHENTIK_BOOTSTRAP_TOKEN}
       AUTHENTIK_BOOTSTRAP_EMAIL: ${AUTHENTIK_BOOTSTRAP_EMAIL}
       AUTHENTIK_ERROR_REPORTING__ENABLED: "false"
+      AUTHENTIK_HOST: "http://auth.bagelindustries.com"
+      AUTHENTIK_LISTEN__TRUSTED_PROXY_CIDRS: "192.168.0.0/16"
     volumes:
       - media:/media
       - custom-templates:/templates
@@ -204,73 +187,3 @@ for i in $(seq 1 60); do
   sleep 10
 done
 
-# --- Bootstrap Authentik via Django ORM ---
-# Using docker exec avoids API token auth issues across Authentik versions.
-echo "Bootstrapping Authentik..."
-
-cat > /tmp/ak_bootstrap.py << 'PYEOF'
-from authentik.flows.models import Flow, FlowDesignation
-from authentik.providers.proxy.models import ProxyProvider, ProxyMode
-from authentik.core.models import Application, User
-from authentik.outposts.models import Outpost
-
-import os
-
-# Ensure admin user has correct email and password
-admin = User.objects.filter(is_superuser=True).first()
-if admin:
-    admin.email = "raygenrrupe@gmail.com"
-    bootstrap_password = os.environ.get("AUTHENTIK_BOOTSTRAP_PASSWORD", "")
-    if bootstrap_password:
-        admin.set_password(bootstrap_password)
-    admin.save()
-    print(f"Admin user: {admin.username} ({admin.email})")
-
-flow = Flow.objects.filter(designation=FlowDesignation.AUTHENTICATION).first()
-if not flow:
-    print("ERROR: No authentication flow found"); exit(1)
-print(f"Flow: {flow.slug}")
-
-outpost = Outpost.objects.filter(name__icontains="embedded").first()
-if not outpost:
-    print("ERROR: No embedded outpost found"); exit(1)
-print(f"Outpost: {outpost.name}")
-
-protected = [
-    ("Demo App",   "demo-app",   "http://demo.bagelindustries.com"),
-    ("Nomad UI",   "nomad-ui",   "http://nomad.bagelindustries.com"),
-    ("Consul UI",  "consul-ui",  "http://consul.bagelindustries.com"),
-]
-
-for name, slug, host in protected:
-    provider, created = ProxyProvider.objects.get_or_create(
-        name=f"{name} Forward Auth",
-        defaults={"authorization_flow": flow, "mode": ProxyMode.FORWARD_SINGLE, "external_host": host},
-    )
-    if not created:
-        provider.external_host = host
-        provider.save()
-    print(f"Provider {provider.pk}: {name} (created={created})")
-
-    app, created = Application.objects.get_or_create(
-        slug=slug,
-        defaults={"name": name, "provider": provider},
-    )
-    if not created:
-        app.provider = provider
-        app.save()
-    print(f"App {app.slug} (created={created})")
-
-    outpost.providers.add(provider)
-
-config = outpost.config
-config["authentik_host"] = "http://authentik.bagelindustries.com"
-config["authentik_host_insecure"] = True
-outpost.config = config
-outpost.save()
-print("Bootstrap complete")
-PYEOF
-
-docker cp /tmp/ak_bootstrap.py authentik-server-1:/tmp/ak_bootstrap.py
-docker exec authentik-server-1 ak shell -c "exec(open('/tmp/ak_bootstrap.py').read())"
-echo "Authentik bootstrap complete"

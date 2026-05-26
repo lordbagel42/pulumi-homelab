@@ -10,7 +10,10 @@
         "@infisical/sdk": "^5.0.2",
         "@muhlba91/pulumi-proxmoxve": "^8.1.0",
         "@pulumi/command": "^1.0.0",
+        "@pulumi/consul": "^3.14.1",
+        "@pulumi/nomad": "^2.6.1",
         "@pulumi/pulumi": "^3.113.0",
+        "@sapslaj/pulumi-authentik": "^2025.12.1",
         "@types/js-yaml": "^4.0.9",
         "js-yaml": "^4.1.1"
     },

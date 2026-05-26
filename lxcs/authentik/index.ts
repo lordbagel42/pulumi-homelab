@@ -2,27 +2,58 @@ import * as path from "path";
 import * as pulumi from "@pulumi/pulumi";
 import * as proxmox from "@muhlba91/pulumi-proxmoxve";
 import * as command from "@pulumi/command";
-import { InfisicalConfig, lxcPassword, managedSecret } from "../../infisical";
+import * as consul from "@pulumi/consul";
+import { InfisicalConfig, lxcPassword, managedSecret, readSecret } from "../../infisical";
 import { CONSUL_VERSION, CONSUL_IP_CONST } from "../hashistack";
 import { ip, GATEWAY } from "../../framework";
 import type { ServiceContext } from "../../framework";
+import { installAlloy } from "../../utils/alloy";
 
 // ── ServiceModule contract ─────────────────────────────────────────────────────
 export const name = "authentik";
 export const provides = ["authentik-setup"];
-export const dependencies: string[] = [];
+export const dependencies: string[] = ["consul-setup"];
 
 export function register(ctx: ServiceContext): command.local.Command {
-    return createAuthentik({
+    const setup = createAuthentik({
         provider: ctx.provider,
         infisicalConfig: ctx.infisicalConfig,
         sshKey: ctx.sshKey,
         sshPrivateKey: ctx.sshPrivateKey,
         pgPass: managedSecret("authentik-pg-pass", ctx.infisicalConfig),
         secretKey: managedSecret("authentik-secret-key", ctx.infisicalConfig),
-        bootstrapPassword: managedSecret("ADMIN_USER_PASS", ctx.infisicalConfig),
+        bootstrapPassword: readSecret("ADMIN_USER_PASS", { ...ctx.infisicalConfig, secretPath: "/" }),
         bootstrapToken: managedSecret("authentik-bootstrap-token", ctx.infisicalConfig),
     }, cmd => ctx.commands.set("authentik-setup", cmd));
+
+    // ── Consul service registration ────────────────────────────────────────────
+    const consulNode = ctx.commands.get("consul-node");
+    const consulProvider = new consul.Provider("authentik-consul", {
+        address: `${CONSUL_IP_CONST}:8500`,
+        scheme: "http",
+    }, { dependsOn: [setup] });
+
+    new consul.Service("authentik-consul-service", {
+        name: "authentik",
+        node: "pulumi-services",
+        address: AUTHENTIK_IP,
+        port: 9000,
+        tags: [
+            "traefik.enable=true",
+            `traefik.http.routers.authentik.rule=Host(\`auth.bagelindustries.com\`)`,
+            "traefik.http.routers.authentik.entrypoints=web",
+            `traefik.http.services.authentik.loadbalancer.server.port=9000`,
+            `traefik.http.middlewares.authentik.forwardauth.address=http://${AUTHENTIK_IP}:9000/outpost.goauthentik.io/auth/traefik`,
+            "traefik.http.middlewares.authentik.forwardauth.trustForwardHeader=true",
+            "traefik.http.middlewares.authentik.forwardauth.authResponseHeaders=X-authentik-username,X-authentik-groups,X-authentik-email,X-authentik-uid,X-authentik-jwt,X-authentik-meta-jwks,X-authentik-meta-outpost,X-authentik-meta-provider,X-authentik-meta-app,X-authentik-meta-version",
+        ],
+    }, { provider: consulProvider, dependsOn: consulNode ? [consulNode] : [] });
+
+    if (ctx.grafana) {
+        installAlloy("authentik", AUTHENTIK_IP, "authentik", ctx.grafana, ctx.sshPrivateKey, [setup]);
+    }
+
+    return setup;
 }
 
 const AUTHENTIK_VMID = 220;
@@ -103,5 +134,6 @@ exit $rc
         },
     }, { dependsOn: [container] });
     onSetup?.(setupCmd);
+
     return setupCmd;
 }
