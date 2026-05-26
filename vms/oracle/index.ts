@@ -89,23 +89,49 @@ exit $rc
         const alloyScriptPath = path.join(__dirname, "../../utils/alloy-setup.sh");
         const alloyScriptHash = crypto.createHash("sha256").update(fs.readFileSync(alloyScriptPath)).digest("hex");
 
+        // Oracle-specific Alloy config snippet: tail Pelican Laravel log files
+        // (Pelican logs to /app/pelican/logs/ not stdout, so Docker source misses them)
+        const pelicanAlloySnippet = `
+
+// ── Pelican Laravel log files ─────────────────────────────────────────────────
+
+local.file_match "pelican_logs" {
+  path_targets = [{
+    __address__ = "localhost",
+    __path__    = "/app/pelican/logs/*.log",
+    instance    = "oracle",
+    job         = "pelican",
+  }]
+}
+
+loki.source.file "pelican_logs" {
+  targets    = local.file_match.pelican_logs.targets
+  forward_to = [loki.write.grafana_cloud_loki.receiver]
+}
+`;
+        const snippetHash = crypto.createHash("sha256").update(pelicanAlloySnippet).digest("hex");
+
         new command.local.Command("oracle-alloy", {
-            triggers: [alloyScriptHash],
+            triggers: [alloyScriptHash, snippetHash],
             create: pulumi.interpolate`
 key=$(mktemp)
 chmod 600 "$key"
 printf '%s\n' "$_SSH_KEY" > "$key"
+snippet=$(mktemp)
+printf '%s' "$_PELICAN_SNIPPET" > "$snippet"
 scp -i "$key" -o StrictHostKeyChecking=no "${alloyScriptPath}" "$_USER@$_HOST":/tmp/alloy-setup.sh
+scp -i "$key" -o StrictHostKeyChecking=no "$snippet" "$_USER@$_HOST":/tmp/pelican-alloy.snippet
 ssh -i "$key" -o StrictHostKeyChecking=no "$_USER@$_HOST" \
-  "ALLOY_NODE_LABEL=oracle GCLOUD_HOSTED_LOGS_URL=${g.logsUrl} GCLOUD_HOSTED_LOGS_ID=${g.logsId} GCLOUD_HOSTED_METRICS_URL=${g.metricsUrl} GCLOUD_HOSTED_METRICS_ID=${g.metricsId} GCLOUD_RW_API_KEY=${g.apiKey} GCLOUD_SCRAPE_INTERVAL=${g.scrapeInterval} sudo -E bash /tmp/alloy-setup.sh"
+  "ALLOY_NODE_LABEL=oracle GCLOUD_HOSTED_LOGS_URL=${g.logsUrl} GCLOUD_HOSTED_LOGS_ID=${g.logsId} GCLOUD_HOSTED_METRICS_URL=${g.metricsUrl} GCLOUD_HOSTED_METRICS_ID=${g.metricsId} GCLOUD_RW_API_KEY=${g.apiKey} GCLOUD_SCRAPE_INTERVAL=${g.scrapeInterval} sudo -E bash /tmp/alloy-setup.sh && sudo tee -a /etc/alloy/config.alloy < /tmp/pelican-alloy.snippet > /dev/null && sudo systemctl restart alloy"
 rc=$?
-rm -f "$key"
+rm -f "$key" "$snippet"
 exit $rc
             `.apply(s => s.trim()),
             environment: {
                 _SSH_KEY: pulumi.output(ctx.oraclePrivateKey),
                 _HOST: pulumi.output(ctx.oraclePublicIp),
                 _USER: pulumi.output(ctx.oracleUser),
+                _PELICAN_SNIPPET: pelicanAlloySnippet,
             },
         }, { dependsOn: [setupCmd] });
     }
