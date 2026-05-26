@@ -24,8 +24,12 @@ api:
 entryPoints:
   web:
     address: ":80"
+    forwardedHeaders:
+      insecure: true
   websecure:
     address: ":443"
+    forwardedHeaders:
+      insecure: true
   traefik:
     address: ":8080"
 

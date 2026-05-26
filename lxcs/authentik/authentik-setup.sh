@@ -187,3 +187,36 @@ for i in $(seq 1 60); do
   sleep 10
 done
 
+# --- Bootstrap Authentik applications via Django ORM ---
+echo "Bootstrapping Authentik applications..."
+docker exec authentik-server-1 ak shell -c "
+from authentik.flows.models import Flow, FlowDesignation
+from authentik.providers.proxy.models import ProxyProvider, ProxyMode
+from authentik.core.models import Application
+from authentik.outposts.models import Outpost
+
+flow = Flow.objects.filter(designation=FlowDesignation.AUTHENTICATION).first()
+outpost = Outpost.objects.filter(name__icontains='embedded').first()
+
+apps = [
+    ('Nomad UI',  'nomad-ui',  'https://nomad.bagelindustries.com'),
+    ('Consul UI', 'consul-ui', 'https://consul.bagelindustries.com'),
+    ('Demo App',  'demo-app',  'https://demo.bagelindustries.com'),
+]
+for name, slug, host in apps:
+    provider, _ = ProxyProvider.objects.get_or_create(
+        name=f'{name} Forward Auth',
+        defaults={'authorization_flow': flow, 'mode': ProxyMode.FORWARD_SINGLE, 'external_host': host},
+    )
+    provider.external_host = host
+    provider.mode = ProxyMode.FORWARD_SINGLE
+    provider.save()
+    app, _ = Application.objects.get_or_create(slug=slug, defaults={'name': name, 'provider': provider})
+    app.provider = provider
+    app.save()
+    outpost.providers.add(provider)
+    print(f'Configured: {name}')
+print('Bootstrap complete')
+"
+echo "Authentik bootstrap complete"
+
