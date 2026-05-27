@@ -11,7 +11,7 @@ import type { ServiceContext } from "../../framework";
 // ── ServiceModule contract ─────────────────────────────────────────────────────
 export const name = "oracle";
 export const provides = ["oracle-setup", "oracle-jobs"];
-export const dependencies = ["nomad-setup"];
+export const dependencies = ["nomad-setup", "pbs-setup"];
 
 export function register(ctx: ServiceContext): void {
     if (!ctx.oraclePublicIp || !ctx.oraclePrivateKey || !ctx.oracleUser || !ctx.oracleCfTunnelToken || !ctx.oracleNbIp) {
@@ -82,6 +82,21 @@ exit $rc
                 .replace("__CF_TOKEN__", token)
         ),
     }, jobOpts);
+
+    // ── PBS backup job (only deployed when pbs-fingerprint is available) ───────
+    const pbsFingerprintCmd = ctx.commands.get("pbs-fingerprint") as (command.local.Command | undefined);
+    if (pbsFingerprintCmd && ctx.pbsBackupPassword) {
+        const pbsPassword = pulumi.output(ctx.pbsBackupPassword);
+        new nomad.Job("oracle-pbs-backup", {
+            jobspec: pulumi.all([pbsFingerprintCmd.stdout, pbsPassword]).apply(
+                ([fingerprint, password]) =>
+                    fs.readFileSync(path.join(__dirname, "pbs-backup.nomad.hcl"), "utf-8")
+                        .replace("__PBS_IP__", "192.168.0.100")
+                        .replace("__PBS_PASSWORD__", password)
+                        .replace("__PBS_FINGERPRINT__", fingerprint.trim())
+            ),
+        }, { provider: nomadProvider, dependsOn: [setupCmd, pbsFingerprintCmd] });
+    }
 
     // ── Alloy observability on oracle VM ───────────────────────────────────────
     if (ctx.grafana) {

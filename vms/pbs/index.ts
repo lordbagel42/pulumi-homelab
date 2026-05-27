@@ -7,7 +7,7 @@ import type { ServiceContext } from "../../framework";
 
 // ── ServiceModule contract ─────────────────────────────────────────────────────
 export const name = "pbs";
-export const provides = ["pbs-setup"];
+export const provides = ["pbs-setup", "pbs-fingerprint"];
 export const dependencies: string[] = [];
 
 export function register(ctx: ServiceContext): void {
@@ -47,7 +47,7 @@ runcmd:
         },
     }, { provider: ctx.provider });
 
-    createPbs({
+    const { fingerprintCmd } = createPbs({
         provider: ctx.provider,
         sshKey: ctx.sshKey,
         sshPrivateKey: ctx.sshPrivateKey,
@@ -58,6 +58,9 @@ runcmd:
         proxmoxUsername: pulumi.output(ctx.proxmoxUsername),
         proxmoxPassword: pulumi.output(ctx.proxmoxPassword),
     });
+
+    ctx.commands.set("pbs-setup", fingerprintCmd);
+    ctx.commands.set("pbs-fingerprint", fingerprintCmd);
 }
 
 const PBS_VMID = 100;
@@ -101,7 +104,7 @@ export function createPbs({
 	proxmoxEndpoint,
 	proxmoxUsername,
 	proxmoxPassword,
-}: PbsArgs): void {
+}: PbsArgs): { fingerprintCmd: command.local.Command } {
 	const pbsScriptPath = path.join(__dirname, "pbs-setup.sh");
 
 	const pbsVm = new proxmox.VmLegacy("proxmox-backup-server", {
@@ -288,4 +291,6 @@ curl -sf -k -X DELETE "$ENDPOINT/api2/json/cluster/backup/nightly-backup" \\
 			_PVE_ENDPOINT: proxmoxEndpoint,
 		},
 	}, { dependsOn: [storageRegister] });
+
+	return { fingerprintCmd: pbsFingerprint };
 }
