@@ -34,7 +34,7 @@ export function register(ctx: ServiceContext): void {
         initialization: {
             hostname: "uptime-kuma",
             ipConfigs: [{ ipv4: { address: `${UPTIME_KUMA_IP}/24`, gateway: GATEWAY } }],
-            userAccount: { password: lxcPassword("uptime-kuma", ctx.infisicalConfig), keys: [ctx.sshKey] },
+            userAccount: { password: lxcPassword("uptime-kuma", ctx.infisicalConfig), keys: [ctx.sshKey] }, // ggignore
         },
         features: { nesting: true },
         unprivileged: false,
