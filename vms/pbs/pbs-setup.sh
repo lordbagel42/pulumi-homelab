@@ -34,7 +34,7 @@ for i in $(seq 1 40); do
 done
 
 # Detect the data disk: the largest unpartitioned block device that is not the boot disk
-BOOT_DEV=$(lsblk -no PKNAME $(findmnt -n -o SOURCE /) 2>/dev/null | head -1)
+BOOT_DEV=$(lsblk -no PKNAME "$(findmnt -n -o SOURCE /)" 2>/dev/null | head -1)
 DATA_DISK=""
 for dev in /dev/sd?; do
   name=$(basename "$dev")
