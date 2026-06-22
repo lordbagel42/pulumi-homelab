@@ -1,0 +1,177 @@
+- name: Setup Hashistack Component
+  hosts: all
+  become: yes
+  vars:
+    consul_version: "1.20.1"
+    nomad_version: "1.9.4"
+    traefik_version: "v3.3.1"
+  tasks:
+    - name: Install dependencies
+      apt:
+        name: [wget, unzip, curl, jq]
+        state: present
+        update_cache: yes
+
+    - name: Install Consul
+      block:
+        - name: Download Consul
+          get_url:
+            url: "https://releases.hashicorp.com/consul/{{ consul_version }}/consul_{{ consul_version }}_linux_amd64.zip"
+            dest: /tmp/consul.zip
+        - name: Unzip Consul
+          unarchive:
+            src: /tmp/consul.zip
+            dest: /usr/local/bin
+            remote_src: yes
+            mode: '0755'
+      when: role in ['consul', 'nomad', 'traefik', 'nomad-client']
+
+    - name: Create Consul config directory
+      file:
+        path: /etc/consul.d
+        state: directory
+
+    - name: Configure Consul Server
+      copy:
+        dest: /etc/consul.d/consul.hcl
+        content: |
+          datacenter = "homelab"
+          data_dir   = "/var/lib/consul"
+          server     = true
+          bootstrap_expect = 1
+          ui_config { enabled = true }
+          client_addr = "0.0.0.0"
+          bind_addr   = "{{ ansible_default_ipv4.address }}"
+      when: role == 'consul'
+
+    - name: Configure Consul Client
+      copy:
+        dest: /etc/consul.d/consul.hcl
+        content: |
+          datacenter = "homelab"
+          data_dir   = "/var/lib/consul"
+          retry_join = ["{{ consul_ip }}"]
+          bind_addr  = "{{ ansible_default_ipv4.address }}"
+      when: role in ['nomad', 'traefik', 'nomad-client']
+
+    - name: Install Nomad
+      block:
+        - name: Download Nomad
+          get_url:
+            url: "https://releases.hashicorp.com/nomad/{{ nomad_version }}/nomad_{{ nomad_version }}_linux_amd64.zip"
+            dest: /tmp/nomad.zip
+        - name: Unzip Nomad
+          unarchive:
+            src: /tmp/nomad.zip
+            dest: /usr/local/bin
+            remote_src: yes
+            mode: '0755'
+      when: role in ['nomad', 'nomad-client']
+
+    - name: Create Nomad config directory
+      file:
+        path: /etc/nomad.d
+        state: directory
+      when: role in ['nomad', 'nomad-client']
+
+    - name: Configure Nomad Server
+      copy:
+        dest: /etc/nomad.d/nomad.hcl
+        content: |
+          data_dir = "/var/lib/nomad"
+          bind_addr = "0.0.0.0"
+          server {
+            enabled = true
+            bootstrap_expect = 1
+          }
+          consul {
+            address = "127.0.0.1:8500"
+          }
+      when: role == 'nomad'
+
+    - name: Configure Nomad Client
+      copy:
+        dest: /etc/nomad.d/nomad.hcl
+        content: |
+          data_dir = "/var/lib/nomad"
+          bind_addr = "0.0.0.0"
+          client {
+            enabled = true
+            servers = ["{{ nomad_ip | default('') }}"]
+          }
+          consul {
+            address = "127.0.0.1:8500"
+          }
+      when: role == 'nomad-client'
+
+    - name: Install Traefik
+      block:
+        - name: Download Traefik
+          get_url:
+            url: "https://github.com/traefik/traefik/releases/download/{{ traefik_version }}/traefik_{{ traefik_version }}_linux_amd64.tar.gz"
+            dest: /tmp/traefik.tar.gz
+        - name: Unarchive Traefik
+          unarchive:
+            src: /tmp/traefik.tar.gz
+            dest: /usr/local/bin
+            remote_src: yes
+      when: role == 'traefik'
+
+    - name: Create Traefik config directory
+      file:
+        path: /etc/traefik
+        state: directory
+      when: role == 'traefik'
+
+    - name: Configure Traefik
+      copy:
+        dest: /etc/traefik/traefik.yml
+        content: |
+          entryPoints:
+            web:
+              address: ":80"
+          providers:
+            consulCatalog:
+              endpoint:
+                address: "127.0.0.1:8500"
+      when: role == 'traefik'
+
+    - name: Setup systemd services
+      copy:
+        dest: "/etc/systemd/system/{{ item }}.service"
+        content: |
+          [Unit]
+          Description={{ item }}
+          After=network-online.target
+          Wants=network-online.target
+          [Service]
+          ExecStart=/usr/local/bin/{{ item }} agent -config-dir=/etc/{{ item }}.d/
+          Restart=always
+          [Install]
+          WantedBy=multi-user.target
+      loop: "{{ services }}"
+      when: services is defined and item != 'traefik'
+
+    - name: Setup Traefik systemd service
+      copy:
+        dest: "/etc/systemd/system/traefik.service"
+        content: |
+          [Unit]
+          Description=traefik
+          After=network-online.target
+          Wants=network-online.target
+          [Service]
+          ExecStart=/usr/local/bin/traefik --configFile=/etc/traefik/traefik.yml
+          Restart=always
+          [Install]
+          WantedBy=multi-user.target
+      when: role == 'traefik'
+
+    - name: Enable and start services
+      systemd:
+        name: "{{ item }}"
+        state: restarted
+        enabled: yes
+        daemon_reload: yes
+      loop: "{{ services }}"
+      when: services is defined

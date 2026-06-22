@@ -5,7 +5,7 @@ import * as pulumi from "@pulumi/pulumi";
 import * as command from "@pulumi/command";
 import * as nomad from "@pulumi/nomad";
 import { CONSUL_VERSION, CONSUL_IP_CONST, NOMAD_IP } from "../../lxcs/hashistack";
-import { NOMAD_VERSION, TRAEFIK_VERSION } from "../../framework";
+import { NOMAD_VERSION, TRAEFIK_VERSION } from "../../lxcs/hashistack";
 import type { ServiceContext } from "../../framework";
 
 // ── ServiceModule contract ─────────────────────────────────────────────────────
