@@ -39,6 +39,7 @@ export function register(ctx: ServiceContext) {
         }),
     }, { provider: ctx.provider });
 
+    const consulProvision = ctx.commands.get("consul-setup");
     const provision = ansibleProvision("authentik-provision", {
         host: IP,
         playbookPath: path.join(__dirname, "playbook.yml"),
@@ -50,7 +51,7 @@ export function register(ctx: ServiceContext) {
             bootstrap_password: readSecret("ADMIN_USER_PASS", { ...ctx.infisicalConfig, secretPath: "/" }),
             bootstrap_token: managedSecret("authentik-bootstrap-token", ctx.infisicalConfig),
         },
-        dependsOn: [authentik],
+        dependsOn: consulProvision ? [authentik, consulProvision] : [authentik],
     });
 
     ctx.commands.set("authentik-setup", provision);
