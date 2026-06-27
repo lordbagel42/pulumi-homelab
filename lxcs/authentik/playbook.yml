@@ -9,13 +9,9 @@
         name: [curl, wget, unzip, jq, ca-certificates, gnupg]
         state: present
         update_cache: yes
-      retries: 10
-      delay: 15
-      register: apt_result
-      until: apt_result is succeeded
 
     - name: Install Docker
-      shell: curl -fsSL https://get.docker.com | sh
+      shell: "curl -fsSL https://get.docker.com | sh"
       args:
         creates: /usr/bin/docker
 
@@ -25,28 +21,13 @@
         state: started
         enabled: yes
 
-    - name: Check if Consul is installed
-      stat:
-        path: /usr/local/bin/consul
-      register: consul_binary
-
     - name: Install Consul
-      when: not consul_binary.stat.exists
-      block:
-        - name: Download Consul
-          get_url:
-            url: "https://releases.hashicorp.com/consul/{{ consul_version }}/consul_{{ consul_version }}_linux_amd64.zip"
-            dest: /tmp/consul.zip
-        - name: Unzip Consul
-          unarchive:
-            src: /tmp/consul.zip
-            dest: /usr/local/bin
-            remote_src: yes
-            mode: '0755'
-        - name: Cleanup zip
-          file:
-            path: /tmp/consul.zip
-            state: absent
+      unarchive:
+        src: "https://releases.hashicorp.com/consul/{{ consul_version }}/consul_{{ consul_version }}_linux_amd64.zip"
+        dest: /usr/local/bin
+        remote_src: yes
+        mode: "0755"
+        creates: /usr/local/bin/consul
 
     - name: Create Consul user
       user:
@@ -61,24 +42,21 @@
         state: directory
         owner: consul
         group: consul
-      loop:
-        - /etc/consul.d
-        - /var/lib/consul
+      loop: [/etc/consul.d, /var/lib/consul]
 
     - name: Configure Consul
       copy:
         dest: /etc/consul.d/consul.hcl
-        owner: consul
-        group: consul
-        mode: '0640'
         content: |
           datacenter = "homelab"
           data_dir   = "/var/lib/consul"
           log_level  = "INFO"
           retry_join = ["{{ consul_ip }}"]
           bind_addr  = "{{ ansible_default_ipv4.address }}"
+        owner: consul
+        group: consul
 
-    - name: Setup Consul systemd service
+    - name: Install Consul systemd service
       copy:
         dest: /etc/systemd/system/consul.service
         content: |
@@ -91,10 +69,7 @@
           User=consul
           Group=consul
           ExecStart=/usr/local/bin/consul agent -config-dir=/etc/consul.d/
-          ExecReload=/bin/kill -HUP $MAINPID
-          KillMode=process
           Restart=on-failure
-          LimitNOFILE=65536
           [Install]
           WantedBy=multi-user.target
 
@@ -109,20 +84,19 @@
       file:
         path: /opt/authentik
         state: directory
-        mode: '0700'
 
-    - name: Write .env file
+    - name: Write Authentik .env
       copy:
         dest: /opt/authentik/.env
-        mode: '0600'
         content: |
           PG_PASS={{ pg_pass }}
           SECRET_KEY={{ secret_key }}
           AUTHENTIK_BOOTSTRAP_PASSWORD={{ bootstrap_password }}
           AUTHENTIK_BOOTSTRAP_TOKEN={{ bootstrap_token }}
-          AUTHENTIK_BOOTSTRAP_EMAIL=raygenrrupe@gmail.com
+          AUTHENTIK_BOOTSTRAP_EMAIL={{ bootstrap_email }}
+        mode: "0600"
 
-    - name: Write docker-compose.yml
+    - name: Write Docker Compose file
       copy:
         dest: /opt/authentik/docker-compose.yml
         content: |
@@ -132,29 +106,16 @@
               image: docker.io/library/postgres:16-alpine
               restart: unless-stopped
               healthcheck:
-                test: ["CMD-SHELL", "pg_isready -d $${POSTGRES_DB} -U $${POSTGRES_USER}"]
-                start_period: 20s
-                interval: 30s
-                retries: 5
-                timeout: 5s
-              volumes:
-                - database:/var/lib/postgresql/data
+                test: ["CMD-SHELL", "pg_isready -d ${POSTGRES_DB} -U ${POSTGRES_USER}"]
+              volumes: [database:/var/lib/postgresql/data]
               environment:
                 POSTGRES_PASSWORD: ${PG_PASS}
                 POSTGRES_USER: authentik
                 POSTGRES_DB: authentik
             redis:
               image: docker.io/library/redis:alpine
-              command: --save 60 1 --loglevel warning
               restart: unless-stopped
-              healthcheck:
-                test: ["CMD-SHELL", "redis-cli ping | grep PONG"]
-                start_period: 20s
-                interval: 30s
-                retries: 5
-                timeout: 3s
-              volumes:
-                - redis:/data
+              volumes: [redis:/data]
             server:
               image: ghcr.io/goauthentik/server:latest
               restart: unless-stopped
@@ -169,18 +130,11 @@
                 AUTHENTIK_BOOTSTRAP_PASSWORD: ${AUTHENTIK_BOOTSTRAP_PASSWORD}
                 AUTHENTIK_BOOTSTRAP_TOKEN: ${AUTHENTIK_BOOTSTRAP_TOKEN}
                 AUTHENTIK_BOOTSTRAP_EMAIL: ${AUTHENTIK_BOOTSTRAP_EMAIL}
-                AUTHENTIK_ERROR_REPORTING__ENABLED: "false"
-              volumes:
-                - media:/media
-                - custom-templates:/templates
-              ports:
-                - "9000:9000"
-                - "9443:9443"
+              volumes: [media:/media, custom-templates:/templates]
+              ports: ["9000:9000", "9443:9443"]
               depends_on:
-                postgresql:
-                  condition: service_healthy
-                redis:
-                  condition: service_healthy
+                postgresql: { condition: service_healthy }
+                redis: { condition: service_healthy }
             worker:
               image: ghcr.io/goauthentik/server:latest
               restart: unless-stopped
@@ -192,129 +146,14 @@
                 AUTHENTIK_POSTGRESQL__PASSWORD: ${PG_PASS}
                 AUTHENTIK_POSTGRESQL__NAME: authentik
                 AUTHENTIK_SECRET_KEY: ${SECRET_KEY}
-                AUTHENTIK_ERROR_REPORTING__ENABLED: "false"
               user: root
-              volumes:
-                - /var/run/docker.sock:/var/run/docker.sock
-                - media:/media
-                - certs:/certs
-                - custom-templates:/templates
+              volumes: [/var/run/docker.sock:/var/run/docker.sock, media:/media, certs:/certs, custom-templates:/templates]
               depends_on:
-                postgresql:
-                  condition: service_healthy
-                redis:
-                  condition: service_healthy
-          volumes:
-            database:
-            redis:
-            media:
-            certs:
-            custom-templates:
+                postgresql: { condition: service_healthy }
+                redis: { condition: service_healthy }
+          volumes: { database: {}, redis: {}, media: {}, certs: {}, custom-templates: {} }
 
-    - name: Start Authentik via Docker Compose
-      shell: docker compose up -d
+    - name: Start Authentik
+      shell: "docker compose up -d"
       args:
         chdir: /opt/authentik
-
-    - name: Wait for Authentik to be ready
-      uri:
-        url: "http://localhost:9000/-/health/ready/"
-        status_code: 200
-      register: health_result
-      until: health_result.status == 200
-      retries: 60
-      delay: 10
-
-    - name: Bootstrap Authentik applications
-      shell: |
-        docker exec authentik-server-1 ak shell -c "
-        from authentik.flows.models import Flow, FlowDesignation
-        from authentik.providers.proxy.models import ProxyProvider, ProxyMode
-        from authentik.core.models import Application
-        from authentik.outposts.models import Outpost
-
-        flow = Flow.objects.filter(designation=FlowDesignation.AUTHENTICATION).first()
-        outpost = Outpost.objects.filter(name__icontains='embedded').first()
-
-        config = outpost.config
-        config.authentik_host = 'https://auth.bagelindustries.com'
-        config.authentik_host_browser = 'https://auth.bagelindustries.com'
-        outpost.config = config
-        outpost.save()
-
-        apps = [
-            ('Nomad UI',  'nomad-ui',  'https://nomad.bagelindustries.com'),
-            ('Consul UI', 'consul-ui', 'https://consul.bagelindustries.com'),
-            ('Demo App',  'demo-app',  'https://demo.bagelindustries.com'),
-        ]
-        for name, slug, host in apps:
-            provider, _ = ProxyProvider.objects.get_or_create(
-                name=f'{name} Forward Auth',
-                defaults={'authorization_flow': flow, 'mode': ProxyMode.FORWARD_SINGLE, 'external_host': host},
-            )
-            provider.external_host = host
-            provider.mode = ProxyMode.FORWARD_SINGLE
-            provider.save()
-            app, _ = Application.objects.get_or_create(slug=slug, defaults={'name': name, 'provider': provider})
-            app.provider = provider
-            app.save()
-            outpost.providers.add(provider)
-        print('Bootstrap complete')
-        "
-      args:
-        chdir: /opt/authentik
-      changed_when: false
-
-    - name: Bootstrap passwordless login
-      shell: |
-        docker exec authentik-server-1 ak shell -c "
-        from authentik.stages.identification.models import IdentificationStage, UserFields
-        from authentik.stages.authenticator_webauthn.models import AuthenticatorWebAuthnStage, UserVerification
-        from authentik.stages.authenticator_validate.models import AuthenticatorValidateStage, DeviceClasses, NotConfiguredAction
-        from authentik.stages.user_login.models import UserLoginStage
-        from authentik.flows.models import Flow, FlowDesignation, FlowStageBinding
-
-        login_stage = UserLoginStage.objects.get(name='default-authentication-login')
-
-        webauthn_setup, _ = AuthenticatorWebAuthnStage.objects.get_or_create(
-            name='webauthn-setup',
-            defaults={'user_verification': UserVerification.PREFERRED}
-        )
-
-        webauthn_validate, _ = AuthenticatorValidateStage.objects.get_or_create(
-            name='webauthn-passwordless-validate',
-            defaults={
-                'device_classes': [DeviceClasses.WEBAUTHN],
-                'not_configured_action': NotConfiguredAction.CONFIGURE,
-            }
-        )
-        webauthn_validate.configuration_stages.add(webauthn_setup)
-        webauthn_validate.device_classes = [DeviceClasses.WEBAUTHN]
-        webauthn_validate.save()
-
-        pl_id_stage, _ = IdentificationStage.objects.get_or_create(
-            name='passwordless-identification',
-            defaults={'user_fields': [UserFields.USERNAME, UserFields.E_MAIL]}
-        )
-
-        pl_flow, _ = Flow.objects.get_or_create(
-            slug='passwordless-authentication',
-            defaults={
-                'name': 'Passwordless Authentication',
-                'title': 'Sign in with Passkey',
-                'designation': FlowDesignation.AUTHENTICATION,
-            }
-        )
-
-        FlowStageBinding.objects.get_or_create(target=pl_flow, stage=pl_id_stage, defaults={'order': 10})
-        FlowStageBinding.objects.get_or_create(target=pl_flow, stage=webauthn_validate, defaults={'order': 20})
-        FlowStageBinding.objects.get_or_create(target=pl_flow, stage=login_stage, defaults={'order': 30})
-
-        main_id = IdentificationStage.objects.get(name='default-authentication-identification')
-        main_id.passwordless_flow = pl_flow
-        main_id.save()
-        print('Passwordless login configured:', pl_flow.slug)
-        "
-      args:
-        chdir: /opt/authentik
-      changed_when: false

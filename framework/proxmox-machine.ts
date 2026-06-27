@@ -57,7 +57,6 @@ export class ProxmoxMachine extends pulumi.ComponentResource {
                 networkInterfaces: [{ name: "veth0", bridge: "vmbr0" }],
                 initialization: {
                     hostname: name,
-                    dns: { servers: ["1.1.1.1", "8.8.8.8"] },
                     ipConfigs: [{ ipv4: { address: `${args.ip}/24`, gateway } }],
                     userAccount: {
                         password: args.password,
@@ -69,7 +68,7 @@ export class ProxmoxMachine extends pulumi.ComponentResource {
                 tags: args.tags || [],
                 startOnBoot: true,
                 started: true,
-            }, { parent: this, ...opts, ignoreChanges: ["initialization", "unprivileged"] });
+            }, { parent: this, ...opts });
         } else {
             this.machine = new proxmox.VmLegacy(name, {
                 nodeName: args.nodeName || "optiplex",

@@ -9,7 +9,7 @@ job "oracle-traefik" {
       driver = "docker"
 
       config {
-        image        = "traefik:__TRAEFIK_VERSION__"
+        image        = "traefik:v__TRAEFIK_VERSION__"
         network_mode = "host"
         args = [
           "--api.dashboard=true",

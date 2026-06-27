@@ -1,6 +1,7 @@
 #!/bin/bash
-# Sets up Oracle VM: Docker, Consul server (oracle DC), Traefik config, Nomad client.
-# Required env vars: CONSUL_VERSION, NOMAD_VERSION, NOMAD_SERVER_IP, ORACLE_NB_IP
+# Sets up Oracle VM: Docker, Consul client, Traefik config, Nomad client.
+# Required env vars: CONSUL_VERSION, CONSUL_IP, TRAEFIK_VERSION, NOMAD_VERSION,
+#                    NOMAD_SERVER_IP, ORACLE_NB_IP
 set -e
 export DEBIAN_FRONTEND=noninteractive
 
@@ -17,7 +18,7 @@ systemctl start docker
 # --- ARCH detection (Oracle Free Tier may be ARM64) ---
 ARCH=$(dpkg --print-architecture 2>/dev/null || uname -m | sed 's/aarch64/arm64/;s/x86_64/amd64/')
 
-# --- Consul server (standalone, oracle datacenter) ---
+# --- Consul client ---
 if [ ! -f /usr/local/bin/consul ]; then
   wget -q -O /tmp/consul.zip \
     "https://releases.hashicorp.com/consul/${CONSUL_VERSION}/consul_${CONSUL_VERSION}_linux_${ARCH}.zip"
@@ -30,14 +31,11 @@ useradd -r -d /etc/consul.d -s /sbin/nologin consul 2>/dev/null || true
 mkdir -p /etc/consul.d /var/lib/consul
 
 cat > /etc/consul.d/consul.hcl << CONFEOF
-datacenter       = "oracle"
-data_dir         = "/var/lib/consul"
-log_level        = "INFO"
-server           = true
-bootstrap_expect = 1
-ui_config { enabled = true }
-client_addr      = "0.0.0.0"
-bind_addr        = "$ORACLE_NB_IP"
+datacenter = "homelab"
+data_dir   = "/var/lib/consul"
+log_level  = "INFO"
+retry_join = ["$CONSUL_IP"]
+bind_addr  = "$ORACLE_NB_IP"
 CONFEOF
 
 chown -R consul:consul /etc/consul.d /var/lib/consul
@@ -65,7 +63,7 @@ CONSULEOF
 
 systemctl daemon-reload
 systemctl enable consul
-systemctl restart consul
+systemctl start consul
 
 # --- CNI plugins (required for Nomad bridge networking) ---
 CNI_VERSION="1.5.1"

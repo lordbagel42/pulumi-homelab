@@ -103,24 +103,22 @@ runcmd:
     { provider },
 );
 
+const debianCloudImage = new proxmox.download.File(
+    "debian-cloud-image",
+    {
+        contentType: "import",
+        datastoreId: "local",
+        nodeName: "optiplex",
+        url: "https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-genericcloud-amd64.qcow2",
+        fileName: "debian-12-genericcloud-amd64.qcow2",
+    },
+    { provider },
+);
+
 // ── Static VMs/LXCs from architecture.ts ──────────────────────────────────────
 
-if (vms.length > 0) {
-    const debianCloudImage = new proxmox.download.File(
-        "debian-cloud-image",
-        {
-            contentType: "import",
-            datastoreId: "local",
-            nodeName: "optiplex",
-            url: "https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-genericcloud-amd64.qcow2",
-            fileName: "debian-12-genericcloud-amd64.qcow2",
-            overwrite: false,
-        },
-        { provider },
-    );
-
-    for (const vm of vms) {
-        new proxmox.VmLegacy(
+for (const vm of vms) {
+    new proxmox.VmLegacy(
         vm.name,
         {
             nodeName: vm.nodeName,
@@ -155,8 +153,7 @@ if (vms.length > 0) {
             started: true,
         },
         { provider, ignoreChanges: ["disks"] },
-        );
-    }
+    );
 }
 
 for (const lxc of lxcs) {
@@ -199,7 +196,7 @@ const ctx: ServiceContext = {
     sshKey,
     sshPrivateKey,
     vmPassword,
-    debianCloudImageId: undefined,
+    debianCloudImageId: debianCloudImage.id,
     cloudInitSnippetId: vmCloudInitSnippet.id,
     cloudflaredTunnelToken,
     pbsBackupPassword,
