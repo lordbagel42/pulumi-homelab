@@ -6,11 +6,22 @@
     nomad_version: "1.9.4"
     traefik_version: "v3.3.1"
   tasks:
+    - name: Ensure working DNS (Proxmox PVE forwarders may not work in LXCs)
+      copy:
+        dest: /etc/resolv.conf
+        content: |
+          nameserver 1.1.1.1
+          nameserver 8.8.8.8
+
     - name: Install dependencies
       apt:
         name: [wget, unzip, curl, jq]
         state: present
         update_cache: yes
+      retries: 10
+      delay: 15
+      register: apt_result
+      until: apt_result is succeeded
 
     - name: Install Consul
       block:
@@ -136,21 +147,35 @@
                 address: "127.0.0.1:8500"
       when: role == 'traefik'
 
-    - name: Setup systemd services
+    - name: Setup Consul systemd service
       copy:
-        dest: "/etc/systemd/system/{{ item }}.service"
+        dest: /etc/systemd/system/consul.service
         content: |
           [Unit]
-          Description={{ item }}
+          Description=consul
           After=network-online.target
           Wants=network-online.target
           [Service]
-          ExecStart=/usr/local/bin/{{ item }} agent -config-dir=/etc/{{ item }}.d/
+          ExecStart=/usr/local/bin/consul agent -config-dir=/etc/consul.d/
           Restart=always
           [Install]
           WantedBy=multi-user.target
-      loop: "{{ services }}"
-      when: services is defined and item != 'traefik'
+      when: "'consul' in services"
+
+    - name: Setup Nomad systemd service
+      copy:
+        dest: /etc/systemd/system/nomad.service
+        content: |
+          [Unit]
+          Description=nomad
+          After=network-online.target
+          Wants=network-online.target
+          [Service]
+          ExecStart=/usr/local/bin/nomad agent -config=/etc/nomad.d/
+          Restart=always
+          [Install]
+          WantedBy=multi-user.target
+      when: "'nomad' in services"
 
     - name: Setup Traefik systemd service
       copy:

@@ -7,6 +7,10 @@
         name: [wget, unzip, curl]
         state: present
         update_cache: yes
+      retries: 10
+      delay: 15
+      register: apt_result
+      until: apt_result is succeeded
 
     - name: Install Consul
       block:

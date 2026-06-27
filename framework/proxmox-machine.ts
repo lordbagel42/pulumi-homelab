@@ -57,6 +57,7 @@ export class ProxmoxMachine extends pulumi.ComponentResource {
                 networkInterfaces: [{ name: "veth0", bridge: "vmbr0" }],
                 initialization: {
                     hostname: name,
+                    dns: { servers: ["1.1.1.1", "8.8.8.8"] },
                     ipConfigs: [{ ipv4: { address: `${args.ip}/24`, gateway } }],
                     userAccount: {
                         password: args.password,
