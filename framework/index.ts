@@ -20,7 +20,7 @@ export interface ServiceContext {
     sshKey: string;
     sshPrivateKey: pulumi.Output<string>;
     vmPassword: pulumi.Output<string>;
-    debianCloudImageId: pulumi.Input<string>;
+    debianCloudImageId?: pulumi.Input<string>;
     cloudInitSnippetId: pulumi.Input<string>;
     cloudflaredTunnelToken: pulumi.Input<string>;
     pbsBackupPassword?: pulumi.Input<string>;

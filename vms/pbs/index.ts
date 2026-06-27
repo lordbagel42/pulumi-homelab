@@ -23,6 +23,7 @@ export function register(ctx: ServiceContext): void {
         nodeName: "inspiron",
         url: "https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-genericcloud-amd64.qcow2",
         fileName: "debian-12-genericcloud-amd64.qcow2",
+        overwrite: false,
     }, { provider: ctx.provider });
 
     const pbsCloudInit = new proxmox.FileLegacy("pbs-cloud-init", {
