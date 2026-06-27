@@ -49,7 +49,7 @@ export function register(ctx: ServiceContext) {
             secret_key: managedSecret("authentik-secret-key", ctx.infisicalConfig),
             bootstrap_password: readSecret("ADMIN_USER_PASS", { ...ctx.infisicalConfig, secretPath: "/" }),
             bootstrap_token: managedSecret("authentik-bootstrap-token", ctx.infisicalConfig),
-            bootstrap_email: "admin@bagelindustries.com",
+            bootstrap_email: managedSecret("authentik-bootstrap-email", ctx.infisicalConfig),
         },
         dependsOn: [authentik],
     });
