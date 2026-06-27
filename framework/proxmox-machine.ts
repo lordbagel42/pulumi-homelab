@@ -69,7 +69,7 @@ export class ProxmoxMachine extends pulumi.ComponentResource {
                 tags: args.tags || [],
                 startOnBoot: true,
                 started: true,
-            }, { parent: this, ...opts });
+            }, { parent: this, ...opts, ignoreChanges: ["initialization", "unprivileged"] });
         } else {
             this.machine = new proxmox.VmLegacy(name, {
                 nodeName: args.nodeName || "optiplex",
