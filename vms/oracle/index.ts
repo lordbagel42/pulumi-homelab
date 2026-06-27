@@ -19,6 +19,7 @@ export function register(ctx: ServiceContext): void {
     }
 
     const scriptPath = path.join(__dirname, "oracle-setup.sh");
+    const scriptHash = crypto.createHash("sha256").update(fs.readFileSync(scriptPath)).digest("hex");
     const nomadSetupDep = ctx.commands.get("nomad-setup");
 
     const setupCmd = new command.local.Command("oracle-setup", {
@@ -41,6 +42,7 @@ rc=$?
 rm -f "$key"
 exit $rc
         `.trim(),
+        triggers: [scriptHash],
         environment: {
             _ORACLE_PRIVATE_KEY: pulumi.output(ctx.oraclePrivateKey),
             _ORACLE_PUBLIC_IP: pulumi.output(ctx.oraclePublicIp),
