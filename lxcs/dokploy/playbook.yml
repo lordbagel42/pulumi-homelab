@@ -1,0 +1,61 @@
+- name: Setup Dokploy
+  hosts: all
+  become: yes
+  tasks:
+    - name: Install dependencies
+      apt:
+        name: [wget, unzip, curl]
+        state: present
+        update_cache: yes
+
+    - name: Install Consul
+      block:
+        - name: Download Consul
+          get_url:
+            url: "https://releases.hashicorp.com/consul/{{ consul_version }}/consul_{{ consul_version }}_linux_amd64.zip"
+            dest: /tmp/consul.zip
+        - name: Unzip Consul
+          unarchive:
+            src: /tmp/consul.zip
+            dest: /usr/local/bin
+            remote_src: yes
+            mode: '0755'
+
+    - name: Create Consul config
+      file:
+        path: /etc/consul.d
+        state: directory
+
+    - name: Configure Consul
+      copy:
+        dest: /etc/consul.d/consul.hcl
+        content: |
+          datacenter = "homelab"
+          data_dir   = "/var/lib/consul"
+          retry_join = ["{{ consul_ip }}"]
+          bind_addr  = "{{ ansible_default_ipv4.address }}"
+
+    - name: Install Consul service
+      copy:
+        dest: /etc/systemd/system/consul.service
+        content: |
+          [Unit]
+          Description=Consul Agent
+          After=network-online.target
+          [Service]
+          ExecStart=/usr/local/bin/consul agent -config-dir=/etc/consul.d/
+          Restart=always
+          [Install]
+          WantedBy=multi-user.target
+
+    - name: Start Consul
+      systemd:
+        name: consul
+        state: restarted
+        enabled: yes
+        daemon_reload: yes
+
+    - name: Install Dokploy
+      shell: "wget -q -O - https://dokploy.com/install.sh | /bin/bash"
+      args:
+        creates: /etc/dokploy

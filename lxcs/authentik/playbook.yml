@@ -1,0 +1,159 @@
+- name: Setup Authentik
+  hosts: all
+  become: yes
+  vars:
+    consul_version: "1.20.1"
+  tasks:
+    - name: Install dependencies
+      apt:
+        name: [curl, wget, unzip, jq, ca-certificates, gnupg]
+        state: present
+        update_cache: yes
+
+    - name: Install Docker
+      shell: "curl -fsSL https://get.docker.com | sh"
+      args:
+        creates: /usr/bin/docker
+
+    - name: Ensure Docker is started
+      systemd:
+        name: docker
+        state: started
+        enabled: yes
+
+    - name: Install Consul
+      unarchive:
+        src: "https://releases.hashicorp.com/consul/{{ consul_version }}/consul_{{ consul_version }}_linux_amd64.zip"
+        dest: /usr/local/bin
+        remote_src: yes
+        mode: "0755"
+        creates: /usr/local/bin/consul
+
+    - name: Create Consul user
+      user:
+        name: consul
+        system: yes
+        home: /etc/consul.d
+        shell: /sbin/nologin
+
+    - name: Create Consul directories
+      file:
+        path: "{{ item }}"
+        state: directory
+        owner: consul
+        group: consul
+      loop: [/etc/consul.d, /var/lib/consul]
+
+    - name: Configure Consul
+      copy:
+        dest: /etc/consul.d/consul.hcl
+        content: |
+          datacenter = "homelab"
+          data_dir   = "/var/lib/consul"
+          log_level  = "INFO"
+          retry_join = ["{{ consul_ip }}"]
+          bind_addr  = "{{ ansible_default_ipv4.address }}"
+        owner: consul
+        group: consul
+
+    - name: Install Consul systemd service
+      copy:
+        dest: /etc/systemd/system/consul.service
+        content: |
+          [Unit]
+          Description=Consul Agent
+          After=network-online.target
+          Wants=network-online.target
+          [Service]
+          Type=simple
+          User=consul
+          Group=consul
+          ExecStart=/usr/local/bin/consul agent -config-dir=/etc/consul.d/
+          Restart=on-failure
+          [Install]
+          WantedBy=multi-user.target
+
+    - name: Enable and start Consul
+      systemd:
+        name: consul
+        state: restarted
+        enabled: yes
+        daemon_reload: yes
+
+    - name: Create Authentik directory
+      file:
+        path: /opt/authentik
+        state: directory
+
+    - name: Write Authentik .env
+      copy:
+        dest: /opt/authentik/.env
+        content: |
+          PG_PASS={{ pg_pass }}
+          SECRET_KEY={{ secret_key }}
+          AUTHENTIK_BOOTSTRAP_PASSWORD={{ bootstrap_password }}
+          AUTHENTIK_BOOTSTRAP_TOKEN={{ bootstrap_token }}
+          AUTHENTIK_BOOTSTRAP_EMAIL={{ bootstrap_email }}
+        mode: "0600"
+
+    - name: Write Docker Compose file
+      copy:
+        dest: /opt/authentik/docker-compose.yml
+        content: |
+          version: "3.4"
+          services:
+            postgresql:
+              image: docker.io/library/postgres:16-alpine
+              restart: unless-stopped
+              healthcheck:
+                test: ["CMD-SHELL", "pg_isready -d ${POSTGRES_DB} -U ${POSTGRES_USER}"]
+              volumes: [database:/var/lib/postgresql/data]
+              environment:
+                POSTGRES_PASSWORD: ${PG_PASS}
+                POSTGRES_USER: authentik
+                POSTGRES_DB: authentik
+            redis:
+              image: docker.io/library/redis:alpine
+              restart: unless-stopped
+              volumes: [redis:/data]
+            server:
+              image: ghcr.io/goauthentik/server:latest
+              restart: unless-stopped
+              command: server
+              environment:
+                AUTHENTIK_REDIS__HOST: redis
+                AUTHENTIK_POSTGRESQL__HOST: postgresql
+                AUTHENTIK_POSTGRESQL__USER: authentik
+                AUTHENTIK_POSTGRESQL__PASSWORD: ${PG_PASS}
+                AUTHENTIK_POSTGRESQL__NAME: authentik
+                AUTHENTIK_SECRET_KEY: ${SECRET_KEY}
+                AUTHENTIK_BOOTSTRAP_PASSWORD: ${AUTHENTIK_BOOTSTRAP_PASSWORD}
+                AUTHENTIK_BOOTSTRAP_TOKEN: ${AUTHENTIK_BOOTSTRAP_TOKEN}
+                AUTHENTIK_BOOTSTRAP_EMAIL: ${AUTHENTIK_BOOTSTRAP_EMAIL}
+              volumes: [media:/media, custom-templates:/templates]
+              ports: ["9000:9000", "9443:9443"]
+              depends_on:
+                postgresql: { condition: service_healthy }
+                redis: { condition: service_healthy }
+            worker:
+              image: ghcr.io/goauthentik/server:latest
+              restart: unless-stopped
+              command: worker
+              environment:
+                AUTHENTIK_REDIS__HOST: redis
+                AUTHENTIK_POSTGRESQL__HOST: postgresql
+                AUTHENTIK_POSTGRESQL__USER: authentik
+                AUTHENTIK_POSTGRESQL__PASSWORD: ${PG_PASS}
+                AUTHENTIK_POSTGRESQL__NAME: authentik
+                AUTHENTIK_SECRET_KEY: ${SECRET_KEY}
+              user: root
+              volumes: [/var/run/docker.sock:/var/run/docker.sock, media:/media, certs:/certs, custom-templates:/templates]
+              depends_on:
+                postgresql: { condition: service_healthy }
+                redis: { condition: service_healthy }
+          volumes: { database: {}, redis: {}, media: {}, certs: {}, custom-templates: {} }
+
+    - name: Start Authentik
+      shell: "docker compose up -d"
+      args:
+        chdir: /opt/authentik

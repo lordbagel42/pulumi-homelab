@@ -34,12 +34,12 @@ for i in $(seq 1 40); do
 done
 
 # Detect the data disk: the largest unpartitioned block device that is not the boot disk
-BOOT_DEV=$(lsblk -no PKNAME $(findmnt -n -o SOURCE /) 2>/dev/null | head -1)
+BOOT_DEV=$(lsblk -no PKNAME "$(findmnt -n -o SOURCE /)" 2>/dev/null | head -1)
 DATA_DISK=""
 for dev in /dev/sd?; do
   name=$(basename "$dev")
   [ "$name" = "$BOOT_DEV" ] && continue
-  parts=$(lsblk -n -o TYPE "$dev" 2>/dev/null | grep -c '^part' || true)
+  parts=$(lsblk -n -o TYPE "$dev" 2>/dev/null | grep -c "^part" || true)
   if [ "$parts" -eq 0 ]; then
     DATA_DISK="$dev"
     break
@@ -49,7 +49,7 @@ done
 if [ -z "$DATA_DISK" ]; then
   echo "ERROR: no unpartitioned data disk found" >&2
   lsblk >&2
-  exit 1
+  return 1
 fi
 echo "Data disk: $DATA_DISK"
 
