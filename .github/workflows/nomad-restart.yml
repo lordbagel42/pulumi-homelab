@@ -1,0 +1,59 @@
+name: Nomad Restart
+
+on:
+  repository_dispatch:
+    types: [nomad-restart-lookout]
+  workflow_dispatch:
+    inputs:
+      job:
+        description: Nomad job name to restart
+        required: true
+        default: lookout
+
+jobs:
+  restart:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install Netbird
+        run: curl -fsSL https://pkgs.netbird.io/install.sh | sudo bash
+
+      - name: Connect Netbird
+        env:
+          NB_SETUP_KEY: ${{ secrets.NB_SETUP_KEY }}
+        run: |
+          if [ -z "$NB_SETUP_KEY" ]; then
+            echo "::error::NB_SETUP_KEY secret is not set — add it under Settings → Secrets → Actions"
+            exit 1
+          fi
+          sudo netbird up --setup-key "$NB_SETUP_KEY"
+
+      - name: Wait for Netbird peer connection
+        run: |
+          connected=false
+          for i in $(seq 1 30); do
+            if sudo netbird status | grep -q "Connected"; then
+              echo "Netbird connected"
+              connected=true
+              break
+            fi
+            echo "Waiting for Netbird... ($i/30)"
+            sleep 2
+          done
+          if [ "$connected" != "true" ]; then
+            echo "::error::Netbird failed to connect after 60 seconds"
+            exit 1
+          fi
+
+      - name: Install Nomad CLI
+        run: |
+          curl -fsSL "https://releases.hashicorp.com/nomad/1.9.4/nomad_1.9.4_linux_amd64.zip" -o /tmp/nomad.zip
+          sudo unzip -o /tmp/nomad.zip -d /usr/local/bin
+
+      - name: Restart Nomad job
+        run: |
+          JOB="${{ github.event.inputs.job || 'lookout' }}"
+          nomad job restart -address=http://192.168.0.202:4646 "$JOB"
+
+      - name: Disconnect Netbird
+        if: always()
+        run: sudo netbird down
