@@ -63,6 +63,7 @@ const oraclePelicanAppKey = readSecret("PELICAN_APP_KEY", oracleInfisicalConfig)
 const oraclePelicanDbPass = readSecret("PELICAN_DB_PASSWORD", oracleInfisicalConfig);
 const oraclePelicanDbRootPass = readSecret("PELICAN_DB_ROOT_PASSWORD", oracleInfisicalConfig);
 
+
 const vmCloudInitSnippet = new proxmox.FileLegacy(
     "vm-cloud-init",
     {
@@ -217,4 +218,5 @@ const ctx: ServiceContext = {
 discoverAndRegisterAll(ctx, [
     path.join(__dirname, "lxcs"),
     path.join(__dirname, "vms"),
+    path.join(__dirname, "nomad"),
 ]);
