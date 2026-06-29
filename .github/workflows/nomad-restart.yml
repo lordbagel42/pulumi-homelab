@@ -52,7 +52,7 @@ jobs:
       - name: Restart Nomad job
         run: |
           JOB="${{ github.event.inputs.job || 'lookout' }}"
-          nomad job restart -address=http://192.168.0.202:4646 "$JOB"
+          nomad job restart -on-error=fail -address=http://192.168.0.202:4646 "$JOB"
 
       - name: Disconnect Netbird
         if: always()
