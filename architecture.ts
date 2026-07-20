@@ -5,7 +5,7 @@
 //   .100       proxmox-backup-server (static, vmId 100)
 //   .201–210   system lxc   — vmId matches last octet  (consul: 201, nomad: 202, traefik: 203, cloudflared: 204)
 //   .211–229   app lxc      — vmId matches last octet  (dokploy: 211)
-//   .230–239   VMs (static) — vmId matches last octet  (nomad-client: 230)
+//   .230–239   VMs (static) — vmId matches last octet  (nomad-client: 230, sandbox: 231)
 //   .240–255   reserved for shenanigans like sst.dev
 //
 // Rule: for any static resource, vmId = last IP octet.
@@ -16,7 +16,7 @@
 //   100–199: DHCP / ephemeral VMs   (proxmox-backup-server: 100)
 //   200–210: system lxc             (consul-server: 201, nomad-server: 202, traefik: 203, cloudflared: 204)
 //   211–229: app lxc                (dokploy: 211)
-//   230–239: static VMs             (nomad-client: 230)
+//   230–239: static VMs             (nomad-client: 230, sandbox: 231)
 
 import { LXCDefinition } from "./lxc-config";
 import { testingVms } from "./vms/testing";

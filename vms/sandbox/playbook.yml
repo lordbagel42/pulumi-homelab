@@ -1,0 +1,150 @@
+- name: Provision Poke sandbox (Claude Code + stateful MCP tools)
+  hosts: all
+  become: yes
+  vars:
+    sandbox_user: poke
+    workspace_dir: "/home/poke/workspace"
+    claude_mcp_port: 8100
+    filesystem_mcp_port: 8101
+    node_major: "22"
+  tasks:
+    - name: Install base packages
+      apt:
+        name:
+          - curl
+          - git
+          - jq
+          - unzip
+          - ca-certificates
+          - gnupg
+          - build-essential
+          - python3
+          - python3-pip
+          - python3-venv
+        state: present
+        update_cache: yes
+
+    # ── Node.js (Claude Code + MCP bridge run on Node) ───────────────────────────
+    - name: Add NodeSource repository
+      shell: "curl -fsSL https://deb.nodesource.com/setup_{{ node_major }}.x | bash -"
+      args:
+        creates: /etc/apt/sources.list.d/nodesource.list
+
+    - name: Install Node.js
+      apt:
+        name: nodejs
+        state: present
+        update_cache: yes
+
+    # ── Docker (isolation for stateful / "dangerous" tools) ──────────────────────
+    - name: Install Docker Engine
+      shell: "curl -fsSL https://get.docker.com | sh"
+      args:
+        creates: /usr/bin/docker
+
+    - name: Ensure Docker is running
+      systemd:
+        name: docker
+        state: started
+        enabled: yes
+
+    # ── Sandbox user + workspace ─────────────────────────────────────────────────
+    - name: Create sandbox user
+      user:
+        name: "{{ sandbox_user }}"
+        shell: /bin/bash
+        groups: docker
+        append: yes
+        create_home: yes
+
+    - name: Create workspace directory
+      file:
+        path: "{{ workspace_dir }}"
+        state: directory
+        owner: "{{ sandbox_user }}"
+        group: "{{ sandbox_user }}"
+        mode: "0755"
+
+    # ── Claude Code + MCP tooling (installed globally) ───────────────────────────
+    - name: Install global npm tooling
+      npm:
+        name: "{{ item }}"
+        global: yes
+        state: present
+      loop:
+        - "@anthropic-ai/claude-code"
+        - "supergateway"
+        - "@modelcontextprotocol/server-filesystem"
+
+    # ── Secrets: the env file is created empty here; the real ANTHROPIC_API_KEY
+    #    is injected out-of-band by Pulumi (see vms/sandbox/index.ts). ────────────
+    - name: Ensure sandbox config directory
+      file:
+        path: /etc/sandbox
+        state: directory
+        mode: "0750"
+
+    - name: Ensure MCP env file exists
+      copy:
+        dest: /etc/sandbox/mcp.env
+        content: ""
+        force: no
+        mode: "0600"
+
+    # ── Persistent MCP bridge services ───────────────────────────────────────────
+    # supergateway wraps a stdio MCP server and exposes it over SSE so a remote
+    # client (Poke) can reach a long-lived, stateful server on this host.
+    - name: Install claude-code-mcp systemd unit
+      copy:
+        dest: /etc/systemd/system/claude-code-mcp.service
+        content: |
+          [Unit]
+          Description=Claude Code MCP bridge (SSE)
+          After=network-online.target
+          Wants=network-online.target
+
+          [Service]
+          Type=simple
+          User={{ sandbox_user }}
+          WorkingDirectory={{ workspace_dir }}
+          Environment=HOME=/home/{{ sandbox_user }}
+          Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+          EnvironmentFile=-/etc/sandbox/mcp.env
+          ExecStart=/usr/bin/env supergateway --stdio "claude mcp serve" --port {{ claude_mcp_port }}
+          Restart=always
+          RestartSec=5
+
+          [Install]
+          WantedBy=multi-user.target
+
+    - name: Install filesystem-mcp systemd unit
+      copy:
+        dest: /etc/systemd/system/filesystem-mcp.service
+        content: |
+          [Unit]
+          Description=Filesystem MCP bridge (SSE)
+          After=network-online.target
+          Wants=network-online.target
+
+          [Service]
+          Type=simple
+          User={{ sandbox_user }}
+          WorkingDirectory={{ workspace_dir }}
+          Environment=HOME=/home/{{ sandbox_user }}
+          Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+          ExecStart=/usr/bin/env supergateway --stdio "mcp-server-filesystem {{ workspace_dir }}" --port {{ filesystem_mcp_port }}
+          Restart=always
+          RestartSec=5
+
+          [Install]
+          WantedBy=multi-user.target
+
+    - name: Enable and start MCP bridge services
+      systemd:
+        name: "{{ item }}"
+        enabled: yes
+        state: started
+        daemon_reload: yes
+      loop:
+        - claude-code-mcp
+        - filesystem-mcp
