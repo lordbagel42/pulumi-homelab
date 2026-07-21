@@ -8,13 +8,14 @@
   "scripts": {
     "start": "node server.mjs",
     "seed": "node seed.mjs",
-    "migrate": "npx --yes @better-auth/cli@1.6.23 migrate -y"
+    "migrate": "npx --yes @better-auth/cli@1.4.21 migrate -y"
   },
   "dependencies": {
     "@better-auth/api-key": "^1.6.23",
     "@hono/node-server": "^1.13.7",
     "better-auth": "^1.6.23",
     "better-sqlite3": "^12.0.0",
-    "hono": "^4.6.14"
+    "hono": "^4.6.14",
+    "undici": "^7.16.0"
   }
 }

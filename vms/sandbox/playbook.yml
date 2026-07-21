@@ -101,13 +101,29 @@
         - /etc/sandbox/gateway.env
 
     # ── better-auth MCP gateway ──────────────────────────────────────────────────
-    - name: Deploy auth gateway application
+    - name: Create auth gateway application directory
+      file:
+        path: "{{ app_dir }}"
+        state: directory
+        owner: "{{ sandbox_user }}"
+        group: "{{ sandbox_user }}"
+        mode: "0755"
+
+    # Copy files explicitly (not the whole directory) so a locally-built
+    # node_modules is never shipped to the VM — deps are installed below.
+    - name: Deploy auth gateway application files
       copy:
-        src: mcp-auth-gateway/
-        dest: "{{ app_dir }}/"
+        src: "mcp-auth-gateway/{{ item }}"
+        dest: "{{ app_dir }}/{{ item }}"
         owner: "{{ sandbox_user }}"
         group: "{{ sandbox_user }}"
         mode: "0644"
+      loop:
+        - auth.js
+        - server.mjs
+        - seed.mjs
+        - package.json
+        - package-lock.json
 
     - name: Install auth gateway dependencies
       npm:
@@ -124,7 +140,7 @@
         mode: "0750"
 
     - name: Run better-auth database migrations
-      command: npx --yes @better-auth/cli@1.6.23 migrate -y
+      command: npx --yes @better-auth/cli@1.4.21 migrate -y
       args:
         chdir: "{{ app_dir }}"
       become_user: "{{ sandbox_user }}"
@@ -133,9 +149,13 @@
         AUTH_DB: /var/lib/mcp-auth/auth.db
       changed_when: false
 
-    # ── Persistent MCP bridge services (localhost only) ──────────────────────────
+    # ── Persistent MCP bridge services ───────────────────────────────────────────
     # supergateway wraps a stdio MCP server and exposes it over SSE. --baseUrl makes
     # it advertise its message endpoint behind the gateway's public path prefix.
+    # NOTE: supergateway has no bind-address flag, so these listen on 0.0.0.0. They
+    # have no auth of their own and are reachable ONLY because ufw denies their
+    # ports below (default-deny incoming + explicit deny). The auth gateway on 8080
+    # is the sole intended entrypoint.
     - name: Install claude-code-mcp systemd unit
       copy:
         dest: /etc/systemd/system/claude-code-mcp.service
@@ -231,6 +251,17 @@
         rule: allow
         port: "{{ gateway_port }}"
         proto: tcp
+
+    # Defense-in-depth: explicitly deny the unauthenticated bridge ports so they
+    # stay blocked even if the default incoming policy is ever changed to allow.
+    - name: Deny the internal MCP bridge ports
+      ufw:
+        rule: deny
+        port: "{{ item }}"
+        proto: tcp
+      loop:
+        - "{{ claude_internal_port }}"
+        - "{{ filesystem_internal_port }}"
 
     - name: Enable the firewall (default deny incoming)
       ufw:

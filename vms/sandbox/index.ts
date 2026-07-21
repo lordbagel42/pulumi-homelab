@@ -98,10 +98,13 @@ export function register(ctx: ServiceContext): void {
     const adminPassword = managedSecret("sandbox-gateway-admin-password", ctx.infisicalConfig);
 
     const credentials = new command.local.Command("sandbox-mcp-credentials", {
+        interpreter: ["/bin/bash", "-c"],
         create: `
+set -euo pipefail
 key=$(mktemp)
 chmod 600 "$key"
 printf '%s\n' "$_SSH_KEY" > "$key"
+trap 'rm -f "$key"' EXIT
 SSH="ssh -i $key -o StrictHostKeyChecking=no -o ConnectTimeout=10"
 HOST=root@${SANDBOX_IP}
 
@@ -118,10 +121,9 @@ printf 'ANTHROPIC_API_KEY=%s\n' "$_ANTHROPIC_API_KEY" | \\
   printf 'API_KEY_FILE=%s\n' "/var/lib/mcp-auth/mcp-api-key"
 } | $SSH "$HOST" "umask 077 && cat > /etc/sandbox/gateway.env"
 
-$SSH "$HOST" "set -a; . /etc/sandbox/gateway.env; set +a; export AUTH_DB=/var/lib/mcp-auth/auth.db HOME=/home/${SANDBOX_USER}; cd /opt/mcp-auth-gateway; sudo -u ${SANDBOX_USER} -E node seed.mjs; systemctl restart mcp-auth-gateway claude-code-mcp filesystem-mcp"
-rc=$?
-rm -f "$key"
-exit $rc
+# Restart so the gateway picks up the injected secret, then seed the API key.
+# seed runs with '&&' so a seeding failure fails the whole resource (no silent success).
+$SSH "$HOST" "set -a; . /etc/sandbox/gateway.env; set +a; export AUTH_DB=/var/lib/mcp-auth/auth.db HOME=/home/${SANDBOX_USER}; cd /opt/mcp-auth-gateway; systemctl restart mcp-auth-gateway claude-code-mcp filesystem-mcp && sudo -u ${SANDBOX_USER} -E node seed.mjs"
         `.trim(),
         environment: {
             _SSH_KEY: ctx.sshPrivateKey,

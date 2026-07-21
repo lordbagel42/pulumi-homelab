@@ -1,9 +1,27 @@
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
+import { Agent } from "undici";
 import { auth } from "./auth.js";
 
 // ── Config ───────────────────────────────────────────────────────────────────
 const PORT = Number(process.env.PORT || 8080);
+
+// SSE connections are long-lived and can idle between events; undici's default
+// body/headers timeouts (~300s) would abort them. Disable them for proxied calls.
+const proxyDispatcher = new Agent({ bodyTimeout: 0, headersTimeout: 0 });
+
+// Hop-by-hop headers must not be forwarded verbatim (RFC 7230 §6.1) — they
+// describe a single connection and confuse the receiving HTTP layer's framing.
+const HOP_BY_HOP = new Set([
+    "connection",
+    "keep-alive",
+    "proxy-authenticate",
+    "proxy-authorization",
+    "te",
+    "trailer",
+    "transfer-encoding",
+    "upgrade",
+]);
 
 // Public path prefix → internal supergateway URL. The MCP servers listen only on
 // localhost (and are firewalled off); this gateway is the sole network entrypoint.
@@ -64,17 +82,21 @@ async function handleProxy(c, prefix, upstream) {
     headers.delete("authorization");
     headers.delete("x-api-key");
 
-    const init = { method: c.req.method, headers, redirect: "manual" };
+    const init = { method: c.req.method, headers, redirect: "manual", dispatcher: proxyDispatcher };
     if (c.req.method !== "GET" && c.req.method !== "HEAD") {
         init.body = c.req.raw.body;
         init.duplex = "half";
     }
 
     const upstreamResponse = await fetch(target, init);
+    const responseHeaders = new Headers();
+    for (const [k, v] of upstreamResponse.headers) {
+        if (!HOP_BY_HOP.has(k.toLowerCase())) responseHeaders.set(k, v);
+    }
     // Stream the (possibly long-lived SSE) body straight back to the client.
     return new Response(upstreamResponse.body, {
         status: upstreamResponse.status,
-        headers: new Headers(upstreamResponse.headers),
+        headers: responseHeaders,
     });
 }
 

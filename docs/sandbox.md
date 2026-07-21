@@ -32,8 +32,17 @@ Poke ──API key──▶ mcp-auth-gateway (:8080, better-auth)
 ```
 
 Only port **8080** (the gateway) and **22** (SSH) are reachable from the
-network — `ufw` denies everything else, so the raw MCP bridges on `9100`/`9101`
-are only reachable via the gateway.
+network. The raw bridges on `9100`/`9101` bind all interfaces (supergateway has
+no bind-address flag) and have no auth of their own, so they are kept off the
+network by `ufw` alone: default-deny incoming plus explicit deny rules for those
+two ports. The auth gateway is the only intended entrypoint.
+
+Clients (Poke) connect to the SSE endpoint under the relevant prefix:
+
+- Claude Code: `<public-url>/claude-code/sse`
+- Filesystem:  `<public-url>/filesystem/sse`
+
+sending the API key on every request (`x-api-key` or `Authorization: Bearer`).
 
 ## Authentication (better-auth)
 
@@ -51,8 +60,8 @@ The gateway is a small Node app (`vms/sandbox/mcp-auth-gateway/`) built on
   no public route that can mint a key.
 
 On first provision a single key (name `poke-sandbox`) is generated and its
-plaintext is written to a root-readable file on the VM. Fetch it once and give
-it to Poke:
+plaintext is written to a `poke`-owned `0600` file on the VM. Fetch it once and
+give it to Poke:
 
 ```bash
 ssh poke@192.168.0.231 cat /var/lib/mcp-auth/mcp-api-key
