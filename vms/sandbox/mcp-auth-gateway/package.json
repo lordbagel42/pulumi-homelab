@@ -1,0 +1,20 @@
+{
+  "name": "mcp-auth-gateway",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "better-auth gateway that protects the sandbox MCP bridge servers with API-key auth",
+  "main": "server.mjs",
+  "scripts": {
+    "start": "node server.mjs",
+    "seed": "node seed.mjs",
+    "migrate": "npx --yes @better-auth/cli@1.6.23 migrate -y"
+  },
+  "dependencies": {
+    "@better-auth/api-key": "^1.6.23",
+    "@hono/node-server": "^1.13.7",
+    "better-auth": "^1.6.23",
+    "better-sqlite3": "^12.0.0",
+    "hono": "^4.6.14"
+  }
+}

@@ -4,9 +4,14 @@
   vars:
     sandbox_user: poke
     workspace_dir: "/home/poke/workspace"
-    claude_mcp_port: 8100
-    filesystem_mcp_port: 8101
+    app_dir: /opt/mcp-auth-gateway
     node_major: "22"
+    # The auth gateway is the only network-facing port; the raw MCP bridges bind
+    # to localhost-only internal ports and are firewalled off.
+    gateway_port: 8080
+    claude_internal_port: 9100
+    filesystem_internal_port: 9101
+    public_url: "http://192.168.0.231:8080"
   tasks:
     - name: Install base packages
       apt:
@@ -15,6 +20,7 @@
           - git
           - jq
           - unzip
+          - ufw
           - ca-certificates
           - gnupg
           - build-essential
@@ -24,7 +30,7 @@
         state: present
         update_cache: yes
 
-    # ── Node.js (Claude Code + MCP bridge run on Node) ───────────────────────────
+    # ── Node.js (Claude Code, MCP bridge and auth gateway all run on Node) ────────
     - name: Add NodeSource repository
       shell: "curl -fsSL https://deb.nodesource.com/setup_{{ node_major }}.x | bash -"
       args:
@@ -76,30 +82,66 @@
         - "supergateway"
         - "@modelcontextprotocol/server-filesystem"
 
-    # ── Secrets: the env file is created empty here; the real ANTHROPIC_API_KEY
-    #    is injected out-of-band by Pulumi (see vms/sandbox/index.ts). ────────────
+    # ── Secrets: env files are created empty here; the real values are injected
+    #    out-of-band by Pulumi (see vms/sandbox/index.ts). ─────────────────────────
     - name: Ensure sandbox config directory
       file:
         path: /etc/sandbox
         state: directory
         mode: "0750"
 
-    - name: Ensure MCP env file exists
+    - name: Ensure env files exist
       copy:
-        dest: /etc/sandbox/mcp.env
+        dest: "{{ item }}"
         content: ""
         force: no
         mode: "0600"
+      loop:
+        - /etc/sandbox/mcp.env
+        - /etc/sandbox/gateway.env
 
-    # ── Persistent MCP bridge services ───────────────────────────────────────────
-    # supergateway wraps a stdio MCP server and exposes it over SSE so a remote
-    # client (Poke) can reach a long-lived, stateful server on this host.
+    # ── better-auth MCP gateway ──────────────────────────────────────────────────
+    - name: Deploy auth gateway application
+      copy:
+        src: mcp-auth-gateway/
+        dest: "{{ app_dir }}/"
+        owner: "{{ sandbox_user }}"
+        group: "{{ sandbox_user }}"
+        mode: "0644"
+
+    - name: Install auth gateway dependencies
+      npm:
+        path: "{{ app_dir }}"
+        production: yes
+        state: present
+
+    - name: Create better-auth data directory
+      file:
+        path: /var/lib/mcp-auth
+        state: directory
+        owner: "{{ sandbox_user }}"
+        group: "{{ sandbox_user }}"
+        mode: "0750"
+
+    - name: Run better-auth database migrations
+      command: npx --yes @better-auth/cli@1.6.23 migrate -y
+      args:
+        chdir: "{{ app_dir }}"
+      become_user: "{{ sandbox_user }}"
+      environment:
+        HOME: "/home/{{ sandbox_user }}"
+        AUTH_DB: /var/lib/mcp-auth/auth.db
+      changed_when: false
+
+    # ── Persistent MCP bridge services (localhost only) ──────────────────────────
+    # supergateway wraps a stdio MCP server and exposes it over SSE. --baseUrl makes
+    # it advertise its message endpoint behind the gateway's public path prefix.
     - name: Install claude-code-mcp systemd unit
       copy:
         dest: /etc/systemd/system/claude-code-mcp.service
         content: |
           [Unit]
-          Description=Claude Code MCP bridge (SSE)
+          Description=Claude Code MCP bridge (SSE, internal)
           After=network-online.target
           Wants=network-online.target
 
@@ -110,7 +152,7 @@
           Environment=HOME=/home/{{ sandbox_user }}
           Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
           EnvironmentFile=-/etc/sandbox/mcp.env
-          ExecStart=/usr/bin/env supergateway --stdio "claude mcp serve" --port {{ claude_mcp_port }}
+          ExecStart=/usr/bin/env supergateway --stdio "claude mcp serve" --port {{ claude_internal_port }} --baseUrl {{ public_url }}/claude-code
           Restart=always
           RestartSec=5
 
@@ -122,7 +164,7 @@
         dest: /etc/systemd/system/filesystem-mcp.service
         content: |
           [Unit]
-          Description=Filesystem MCP bridge (SSE)
+          Description=Filesystem MCP bridge (SSE, internal)
           After=network-online.target
           Wants=network-online.target
 
@@ -132,14 +174,41 @@
           WorkingDirectory={{ workspace_dir }}
           Environment=HOME=/home/{{ sandbox_user }}
           Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-          ExecStart=/usr/bin/env supergateway --stdio "mcp-server-filesystem {{ workspace_dir }}" --port {{ filesystem_mcp_port }}
+          ExecStart=/usr/bin/env supergateway --stdio "mcp-server-filesystem {{ workspace_dir }}" --port {{ filesystem_internal_port }} --baseUrl {{ public_url }}/filesystem
           Restart=always
           RestartSec=5
 
           [Install]
           WantedBy=multi-user.target
 
-    - name: Enable and start MCP bridge services
+    - name: Install mcp-auth-gateway systemd unit
+      copy:
+        dest: /etc/systemd/system/mcp-auth-gateway.service
+        content: |
+          [Unit]
+          Description=better-auth gateway protecting the MCP bridges
+          After=network-online.target
+          Wants=network-online.target
+
+          [Service]
+          Type=simple
+          User={{ sandbox_user }}
+          WorkingDirectory={{ app_dir }}
+          Environment=HOME=/home/{{ sandbox_user }}
+          Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+          Environment=PORT={{ gateway_port }}
+          Environment=AUTH_DB=/var/lib/mcp-auth/auth.db
+          Environment=CLAUDE_UPSTREAM=http://127.0.0.1:{{ claude_internal_port }}
+          Environment=FS_UPSTREAM=http://127.0.0.1:{{ filesystem_internal_port }}
+          EnvironmentFile=-/etc/sandbox/gateway.env
+          ExecStart=/usr/bin/env node server.mjs
+          Restart=always
+          RestartSec=5
+
+          [Install]
+          WantedBy=multi-user.target
+
+    - name: Enable and start services
       systemd:
         name: "{{ item }}"
         enabled: yes
@@ -148,3 +217,23 @@
       loop:
         - claude-code-mcp
         - filesystem-mcp
+        - mcp-auth-gateway
+
+    # ── Firewall: only SSH and the auth gateway are reachable from the network ────
+    - name: Allow SSH through the firewall
+      ufw:
+        rule: allow
+        port: "22"
+        proto: tcp
+
+    - name: Allow the auth gateway through the firewall
+      ufw:
+        rule: allow
+        port: "{{ gateway_port }}"
+        proto: tcp
+
+    - name: Enable the firewall (default deny incoming)
+      ufw:
+        state: enabled
+        policy: deny
+        direction: incoming

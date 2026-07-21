@@ -3,7 +3,7 @@ import * as pulumi from "@pulumi/pulumi";
 import * as command from "@pulumi/command";
 import { ProxmoxMachine } from "../../framework/proxmox-machine";
 import { ansibleProvision } from "../../utils/ansible";
-import { readSecret } from "../../infisical";
+import { readSecret, managedSecret } from "../../infisical";
 import { ip } from "../../framework";
 import type { ServiceContext } from "../../framework";
 
@@ -13,6 +13,9 @@ import type { ServiceContext } from "../../framework";
 //           run code and stateful tools.
 // Issue 10: configure that VM to host persistent MCP bridge servers — Claude Code
 //           and other stateful/"dangerous" tools — reachable over the network.
+//
+// The raw MCP bridges are protected by a better-auth gateway (API-key auth) that
+// is the only network-facing port; the bridges themselves are firewalled off.
 //
 // The module is OPTIONAL. It only provisions anything when the stack opts in:
 //
@@ -28,9 +31,8 @@ export const dependencies: string[] = [];
 const SANDBOX_VMID = 231;
 const SANDBOX_IP = ip(SANDBOX_VMID);
 
-// Persistent MCP bridge servers listen on these ports (SSE over HTTP).
-const CLAUDE_MCP_PORT = 8100;
-const FILESYSTEM_MCP_PORT = 8101;
+// Only the gateway is exposed; the bridges listen on internal, firewalled ports.
+const GATEWAY_PORT = 8080;
 
 const SANDBOX_USER = "poke";
 const WORKSPACE_DIR = `/home/${SANDBOX_USER}/workspace`;
@@ -41,6 +43,11 @@ export function register(ctx: ServiceContext): void {
         // Not opted in — do nothing so the module stays a no-op on most stacks.
         return;
     }
+
+    // Public URL Poke reaches the gateway on. Defaults to the LAN address; set
+    // this to the tunnel/reverse-proxy URL when exposing the sandbox externally.
+    const publicUrl = config.get("SANDBOX_PUBLIC_URL") ?? `http://${SANDBOX_IP}:${GATEWAY_PORT}`;
+    const adminEmail = config.get("SANDBOX_ADMIN_EMAIL") ?? "poke@sandbox.local";
 
     // ── VM (issue 9) ────────────────────────────────────────────────────────────
     // Roomy enough to build code and run containerised tools.
@@ -58,11 +65,11 @@ export function register(ctx: ServiceContext): void {
         password: ctx.vmPassword,
     }, { provider: ctx.provider });
 
-    // ── Tooling + MCP bridge services (issue 10) ─────────────────────────────────
-    // The playbook installs Node/Docker/Claude Code and stands up the systemd
-    // services. Secrets are NOT passed here: ansibleProvision JSON-encodes its
-    // extraVars, which cannot carry a pulumi.Output secret — the key is injected
-    // out-of-band below.
+    // ── Tooling + MCP bridge + auth gateway (issue 10) ───────────────────────────
+    // The playbook installs Node/Docker/Claude Code, the better-auth gateway and
+    // the systemd services. Secrets are NOT passed here: ansibleProvision
+    // JSON-encodes its extraVars, which cannot carry a pulumi.Output secret —
+    // they are injected out-of-band below.
     const provision = ansibleProvision("sandbox-provision", {
         host: SANDBOX_IP,
         playbookPath: path.join(__dirname, "playbook.yml"),
@@ -70,30 +77,48 @@ export function register(ctx: ServiceContext): void {
         extraVars: {
             sandbox_user: SANDBOX_USER,
             workspace_dir: WORKSPACE_DIR,
-            claude_mcp_port: CLAUDE_MCP_PORT,
-            filesystem_mcp_port: FILESYSTEM_MCP_PORT,
+            gateway_port: GATEWAY_PORT,
+            public_url: publicUrl,
         },
         dependsOn: [machine],
     });
     ctx.commands.set("sandbox-setup", provision);
 
-    // ── Inject the Anthropic API key (issue 10) ──────────────────────────────────
-    // Written straight to the MCP env file over SSH so the secret Output is
-    // resolved properly (extraVars can't carry it). The key is passed via the
-    // command environment, never interpolated into the script body, so it does
-    // not land in plaintext in Pulumi state.
+    // ── Inject secrets + seed the API key (issue 10) ─────────────────────────────
+    // Written over SSH so the secret Outputs resolve properly (extraVars can't
+    // carry them). Secrets travel through the command environment and are piped
+    // to remote files via stdin, so they never land in plaintext in Pulumi state
+    // nor in a remote process's argv.
     const anthropicApiKey = readSecret("ANTHROPIC_API_KEY", {
         ...ctx.infisicalConfig,
         secretPath: "/sandbox",
     });
+    // Auto-generated and persisted in Infisical so they stay stable across runs.
+    const betterAuthSecret = managedSecret("sandbox-better-auth-secret", ctx.infisicalConfig);
+    const adminPassword = managedSecret("sandbox-gateway-admin-password", ctx.infisicalConfig);
 
     const credentials = new command.local.Command("sandbox-mcp-credentials", {
         create: `
 key=$(mktemp)
 chmod 600 "$key"
 printf '%s\n' "$_SSH_KEY" > "$key"
-ssh -i "$key" -o StrictHostKeyChecking=no root@${SANDBOX_IP} \\
-  "install -d -m 0750 /etc/sandbox && umask 077 && printf 'ANTHROPIC_API_KEY=%s\\n' \\"$_ANTHROPIC_API_KEY\\" > /etc/sandbox/mcp.env && systemctl restart claude-code-mcp filesystem-mcp"
+SSH="ssh -i $key -o StrictHostKeyChecking=no -o ConnectTimeout=10"
+HOST=root@${SANDBOX_IP}
+
+$SSH "$HOST" "install -d -m 0750 /etc/sandbox"
+
+printf 'ANTHROPIC_API_KEY=%s\n' "$_ANTHROPIC_API_KEY" | \\
+  $SSH "$HOST" "umask 077 && cat > /etc/sandbox/mcp.env"
+
+{
+  printf 'BETTER_AUTH_SECRET=%s\n' "$_BETTER_AUTH_SECRET"
+  printf 'BETTER_AUTH_URL=%s\n' "$_PUBLIC_URL"
+  printf 'GATEWAY_ADMIN_EMAIL=%s\n' "$_ADMIN_EMAIL"
+  printf 'GATEWAY_ADMIN_PASSWORD=%s\n' "$_ADMIN_PASSWORD"
+  printf 'API_KEY_FILE=%s\n' "/var/lib/mcp-auth/mcp-api-key"
+} | $SSH "$HOST" "umask 077 && cat > /etc/sandbox/gateway.env"
+
+$SSH "$HOST" "set -a; . /etc/sandbox/gateway.env; set +a; export AUTH_DB=/var/lib/mcp-auth/auth.db HOME=/home/${SANDBOX_USER}; cd /opt/mcp-auth-gateway; sudo -u ${SANDBOX_USER} -E node seed.mjs; systemctl restart mcp-auth-gateway claude-code-mcp filesystem-mcp"
 rc=$?
 rm -f "$key"
 exit $rc
@@ -101,6 +126,10 @@ exit $rc
         environment: {
             _SSH_KEY: ctx.sshPrivateKey,
             _ANTHROPIC_API_KEY: anthropicApiKey,
+            _BETTER_AUTH_SECRET: betterAuthSecret,
+            _ADMIN_PASSWORD: adminPassword,
+            _ADMIN_EMAIL: adminEmail,
+            _PUBLIC_URL: publicUrl,
         },
     }, { dependsOn: [provision] });
     ctx.commands.set("sandbox-mcp", credentials);
