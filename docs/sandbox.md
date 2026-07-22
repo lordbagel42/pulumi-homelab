@@ -71,21 +71,34 @@ To rotate: delete `/var/lib/mcp-auth/mcp-api-key`, revoke the old key in the DB,
 and re-run the seed script (`cd /opt/mcp-auth-gateway && node seed.mjs` with the
 gateway env sourced).
 
-## Enabling it
+## Configuration
 
-The module is a no-op unless the stack opts in:
+The sandbox is provisioned unconditionally as part of the stack (like the other
+VMs). The only optional setting is the URL Poke reaches the gateway on, which
+defaults to the LAN address — override it when exposing the sandbox externally:
 
 ```bash
-pulumi config set SANDBOX_ENABLED true
-# optional: the URL Poke reaches the gateway on (default http://192.168.0.231:8080)
+# optional: default is http://192.168.0.231:8080
 pulumi config set SANDBOX_PUBLIC_URL https://sandbox.example.com
 ```
 
-It also expects an `ANTHROPIC_API_KEY` secret in Infisical under the `/sandbox`
-path (for Claude Code). Pulumi generates the better-auth secret and the gateway
-admin password automatically (persisted in Infisical) and injects them, along
-with the Anthropic key, into `/etc/sandbox/*.env` over SSH — none of these are
-passed through Ansible extra-vars, which cannot carry a secret.
+No secrets need to be set up by hand: Pulumi generates the better-auth secret
+and the gateway admin password automatically (persisted in Infisical) and
+injects them into `/etc/sandbox/gateway.env` over SSH.
+
+## Claude Code authentication (manual, OAuth)
+
+Claude Code authenticates via OAuth, not an API key. After the VM is provisioned,
+log in once as the sandbox user so the `claude mcp serve` bridge has credentials:
+
+```bash
+ssh poke@192.168.0.231
+claude   # complete the OAuth login (creds are stored under ~/.claude)
+sudo systemctl restart claude-code-mcp
+```
+
+The bridge runs as `poke` with `HOME=/home/poke`, so it picks up those creds. It
+will crash-loop (harmlessly, `Restart=always`) until this login is done.
 
 ## Security notes
 

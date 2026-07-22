@@ -90,15 +90,12 @@
         state: directory
         mode: "0750"
 
-    - name: Ensure env files exist
+    - name: Ensure gateway env file exists
       copy:
-        dest: "{{ item }}"
+        dest: /etc/sandbox/gateway.env
         content: ""
         force: no
         mode: "0600"
-      loop:
-        - /etc/sandbox/mcp.env
-        - /etc/sandbox/gateway.env
 
     # ── better-auth MCP gateway ──────────────────────────────────────────────────
     - name: Create auth gateway application directory
@@ -171,7 +168,8 @@
           WorkingDirectory={{ workspace_dir }}
           Environment=HOME=/home/{{ sandbox_user }}
           Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-          EnvironmentFile=-/etc/sandbox/mcp.env
+          # Claude Code authenticates via OAuth creds stored under the user's HOME
+          # (~/.claude), set up manually once with `claude` — no env/API key here.
           ExecStart=/usr/bin/env supergateway --stdio "claude mcp serve" --port {{ claude_internal_port }} --baseUrl {{ public_url }}/claude-code
           Restart=always
           RestartSec=5
