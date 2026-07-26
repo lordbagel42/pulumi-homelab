@@ -100,13 +100,20 @@
       copy:
         dest: /opt/authentik/docker-compose.yml
         content: |
-          version: "3.4"
           services:
             postgresql:
               image: docker.io/library/postgres:16-alpine
               restart: unless-stopped
+              # Literal db/user here on purpose: ${...} in a compose file is
+              # interpolated by Compose from the .env, not from the service's
+              # own `environment`, so ${POSTGRES_DB}/${POSTGRES_USER} expanded
+              # to empty strings ("variable is not set" warnings) and the check
+              # ran as `pg_isready -d  -U `.
               healthcheck:
-                test: ["CMD-SHELL", "pg_isready -d ${POSTGRES_DB} -U ${POSTGRES_USER}"]
+                test: ["CMD-SHELL", "pg_isready -d authentik -U authentik"]
+                interval: 5s
+                timeout: 5s
+                retries: 20
               volumes: [database:/var/lib/postgresql/data]
               environment:
                 POSTGRES_PASSWORD: ${PG_PASS}
@@ -115,6 +122,15 @@
             redis:
               image: docker.io/library/redis:alpine
               restart: unless-stopped
+              # server/worker both wait on `redis: service_healthy`. Without a
+              # healthcheck here Compose refuses to start them at all:
+              # "dependency failed to start: container authentik-redis-1 has no
+              # healthcheck configured".
+              healthcheck:
+                test: ["CMD-SHELL", "redis-cli ping | grep -q PONG"]
+                interval: 5s
+                timeout: 5s
+                retries: 20
               volumes: [redis:/data]
             server:
               image: ghcr.io/goauthentik/server:latest
