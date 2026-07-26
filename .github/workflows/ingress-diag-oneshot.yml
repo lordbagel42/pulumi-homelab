@@ -1,26 +1,26 @@
 name: Ingress attribution diagnostic (one-shot)
 
-# Round 1 attributed the public 404 to traefik, not cloudflared: traefik on .203
-# returns the same codes for the same Host headers that the public hostnames do
-# (404 for auth/consul/nomad/demo/hellonomad/lookout, 307 for dokploy). So the
-# tunnel and its Cloudflare-side ingress rules are fine and the gap is the
-# consul catalog traefik routes from.
+# Round 1: the 404 is traefik's, not cloudflared's — traefik on .203 returns the
+# same codes for the same Host headers as the public hostnames do. Tunnel fine.
 #
-# Round 1's router table showed the shape of the gap:
-#   consul/nomad       routed as Host(`consul`) / Host(`nomad`) — traefik's
-#                      defaultRule, i.e. self-registered agents with no
-#                      traefik.* tags, so no FQDN router exists at all
-#   demo               correct rule but status=disabled
-#   dokploy            correct and working
-#   auth/lookout/      no router whatsoever
-#   hellonomad
+# Round 2: lookout IS in the consul catalog with correct traefik tags, yet has no
+# router — and its nomad alloc is client=pending with empty TaskStates, so its
+# health check cannot be passing and traefik's consulCatalog provider drops
+# non-passing services. Also: probing .203:8500 from the runner was an invalid
+# test. The playbook sets client_addr = "0.0.0.0" only for the consul SERVER, so
+# client agents keep consul's 127.0.0.1 default. Traefik reaches it over
+# loopback; the server lists traefik/.203 as alive. Nothing wrong there.
 #
-# Round 2 collects the catalog state behind that. Traefik reads its OWN local
-# consul agent on .203:8500, so query both that and the server on .201 — and
-# .201's /v1/catalog/services timed out at 15s in round 1 while
-# /v1/catalog/nodes answered instantly, which needs explaining on its own.
+# Round 3 closes the remaining gaps, from inside .203 where traefik actually
+# reads, plus the reason lookout will not start:
+#   * is authentik in the catalog at all, and with what tags (IaC registers it
+#     via reverseProxy — it is the only service in the repo that does)
+#   * what traefik's own agent sees vs the server
+#   * which checks are failing, and why the lookout alloc is stuck pending
+#   * the datacenter mismatch: the nomad server reports dc1 while every homelab
+#     jobspec asks for datacenters = ["homelab"]
 #
-# Read-only. No pulumi up. Delete once the cause is known.
+# Read-only. No pulumi up. Delete once the fix lands.
 
 on:
   push:
@@ -33,11 +33,18 @@ concurrency:
 
 jobs:
   diag:
-    name: Why is the consul catalog missing traefik routes
+    name: Close the remaining ingress unknowns
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.22.2"
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install
 
       - name: Install Netbird
         run: curl -fsSL https://pkgs.netbird.io/install.sh | sudo bash
@@ -55,78 +62,74 @@ jobs:
           done
           echo "::error::Netbird failed to connect"; exit 1
 
-      # Traefik's view is the one that decides routing, so compare it against
-      # the server's rather than trusting either alone.
-      - name: Consul catalog from both agents
+      - name: Catalog as the server sees it
         run: |
           set -uo pipefail
-          for agent in 192.168.0.201 192.168.0.203; do
-            echo "########## consul agent $agent ##########"
-            echo "--- status/leader ---"
-            curl -sS --max-time 25 "http://$agent:8500/v1/status/leader" || echo "(failed)"
-            echo
-            echo "--- catalog/services ---"
-            curl -sS --max-time 40 "http://$agent:8500/v1/catalog/services" | jq -S . || echo "(failed)"
-            echo "--- agent/members ---"
-            curl -sS --max-time 25 "http://$agent:8500/v1/agent/members" \
-              | jq -r '.[]? | "\(.Name)\t\(.Addr)\tstatus=\(.Status)"' || echo "(failed)"
-            echo
-          done
+          C=http://192.168.0.201:8500
+          echo "--- service names ---"
+          curl -sS --max-time 30 "$C/v1/catalog/services" | jq -r 'keys | join(", ")' || echo "(failed)"
+          echo
+          echo "--- authentik registration ---"
+          curl -sS --max-time 25 "$C/v1/catalog/service/authentik" \
+            | jq -r '.[]? | "node=\(.Node) addr=\(.ServiceAddress // .Address):\(.ServicePort)\ntags=\(.ServiceTags|join("\n     "))"' \
+            || echo "(failed)"
+          echo
+          echo "--- all non-passing checks ---"
+          curl -sS --max-time 25 "$C/v1/health/state/any" \
+            | jq -r '.[]? | select(.Status != "passing") | "\(.Node)/\(.ServiceName // "-")\t\(.CheckID)\t\(.Status)\t\(.Output[0:100])"' \
+            || echo "(failed)"
 
-      - name: Per-service catalog detail
+      # Traefik decides from its own loopback agent, so read that agent, not the
+      # server, and read it from inside the container.
+      - name: Catalog as traefik's own agent sees it
+        env:
+          PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
         run: |
           set -uo pipefail
-          for svc in authentik dokploy demo lookout hello-world consul nomad traefik; do
-            echo "########## $svc ##########"
-            curl -sS --max-time 25 "http://192.168.0.203:8500/v1/catalog/service/$svc" \
-              | jq -r '.[]? | "node=\(.Node)\taddr=\(.ServiceAddress // .Address)\tport=\(.ServicePort)\ttags=\(.ServiceTags|join(" | "))"' \
+          pulumi config get SSH_PRIVATE_KEY --stack homelab > /tmp/id_pve 2>/dev/null || true
+          chmod 600 /tmp/id_pve
+          if [ ! -s /tmp/id_pve ]; then echo "(no ssh key available)"; exit 0; fi
+          timeout -k 5 60 ssh -i /tmp/id_pve -o StrictHostKeyChecking=no \
+            -o ConnectTimeout=8 -o BatchMode=yes root@192.168.0.203 '
+              echo "--- consul agent state ---"
+              systemctl is-active consul
+              echo "--- services known locally ---"
+              curl -s --max-time 10 http://127.0.0.1:8500/v1/catalog/services | jq -r "keys | join(\", \")"
+              echo "--- authentik health as traefik sees it ---"
+              curl -s --max-time 10 "http://127.0.0.1:8500/v1/health/service/authentik" \
+                | jq -r ".[]? | \"checks=\(.Checks|map(.Status)|join(\",\"))\ttags=\(.Service.Tags|join(\" \"))\""
+              echo "--- lookout health as traefik sees it ---"
+              curl -s --max-time 10 "http://127.0.0.1:8500/v1/health/service/lookout" \
+                | jq -r ".[]? | \"checks=\(.Checks|map(.Status + \":\" + (.Output//\"\")[0:60])|join(\" | \"))\""
+              echo "--- traefik log tail ---"
+              journalctl -u traefik --no-pager -n 25 | tail -25
+            ' 2>&1 || echo "(ssh to 192.168.0.203 failed)"
+
+      - name: Why is the lookout alloc pending
+        run: |
+          set -uo pipefail
+          N=http://192.168.0.202:4646
+          echo "--- nodes with datacenter ---"
+          curl -sS --max-time 20 "$N/v1/nodes" \
+            | jq -r '.[]? | "\(.Name)\tdc=\(.Datacenter)\tclass=\(.NodeClass)\tstatus=\(.Status)"' || echo "(failed)"
+          echo
+          echo "--- lookout evaluations (placement failures) ---"
+          curl -sS --max-time 20 "$N/v1/job/lookout/evaluations" \
+            | jq -r '.[]? | "eval=\(.ID[0:8]) status=\(.Status) trigger=\(.TriggeredBy) blocked=\(.BlockedEval // "-")\nfailures=\(.FailedTGAllocs // {} | tojson)"' \
+            || echo "(failed)"
+          echo
+          echo "--- lookout alloc detail ---"
+          alloc=$(curl -sS --max-time 20 "$N/v1/job/lookout/allocations" | jq -r '.[0].ID // empty')
+          if [ -n "$alloc" ]; then
+            curl -sS --max-time 20 "$N/v1/allocation/$alloc" \
+              | jq -r '"client=\(.ClientStatus) desc=\(.ClientDescription // "-")",
+                        (.TaskStates // {} | to_entries[]? |
+                          "task=\(.key) state=\(.value.State) failed=\(.value.Failed)",
+                          (.value.Events // [] | .[-4:][]? | "   event: \(.Type) \(.DisplayMessage // "")"))' \
               || echo "(failed)"
-            echo
-          done
-
-      - name: Consul health state
-        run: |
-          set -uo pipefail
-          echo "--- non-passing health checks ---"
-          curl -sS --max-time 25 "http://192.168.0.203:8500/v1/health/state/any" \
-            | jq -r '.[]? | select(.Status != "passing") | "\(.Node)\t\(.ServiceName)\t\(.CheckID)\t\(.Status)\t\(.Output[0:120])"' \
-            || echo "(failed)"
-
-      - name: Nomad view
-        run: |
-          set -uo pipefail
-          echo "--- nodes ---"
-          curl -sS --max-time 20 http://192.168.0.202:4646/v1/nodes \
-            | jq -r '.[]? | "\(.Name)\t\(.Address)\tclass=\(.NodeClass)\tstatus=\(.Status)\telev=\(.SchedulingEligibility)\tdrivers=\([.Drivers//{}|to_entries[]|select(.value.Healthy)|.key]|join(","))"' \
-            || echo "(failed)"
-          echo
-          echo "--- jobs (all statuses) ---"
-          curl -sS --max-time 20 http://192.168.0.202:4646/v1/jobs \
-            | jq -r '.[]? | "\(.ID)\tdc=\(.Datacenters|join(","))\tstatus=\(.Status)"' || echo "(failed)"
-          echo
-          echo "--- lookout allocations ---"
-          curl -sS --max-time 20 http://192.168.0.202:4646/v1/job/lookout/allocations \
-            | jq -r '.[]? | "\(.ID[0:8])\tclient=\(.ClientStatus)\tnode=\(.NodeName)\tdesired=\(.DesiredStatus)"' \
-            || echo "(failed)"
-          echo
-          echo "--- lookout task states / events ---"
-          curl -sS --max-time 20 http://192.168.0.202:4646/v1/job/lookout/allocations \
-            | jq -r '.[]? | .TaskStates // {} | to_entries[]? | "\(.key)\tstate=\(.value.State)\tfailed=\(.value.Failed)\trestarts=\(.value.Restarts)"' \
-            || echo "(failed)"
-
-      # Nomad only writes services into consul if its own consul integration is
-      # healthy on the client running the alloc, so check the client side too.
-      - name: Nomad client consul integration
-        run: |
-          set -uo pipefail
-          echo "--- nomad agent self (consul block, as the server sees it) ---"
-          curl -sS --max-time 20 http://192.168.0.202:4646/v1/agent/self \
-            | jq '{consul: (.config.Consuls // .config.Consul), datacenter: .config.Datacenter, region: .config.Region}' \
-            || echo "(failed)"
-          echo
-          echo "--- service registrations known to nomad natively ---"
-          curl -sS --max-time 20 http://192.168.0.202:4646/v1/services \
-            | jq -r '.[]? | .Services[]? | "\(.ServiceName)"' || echo "(failed)"
+          else
+            echo "(no allocations)"
+          fi
 
       - name: Disconnect Netbird
         if: always()
