@@ -1,0 +1,67 @@
+- name: Setup Cloudflared
+  hosts: all
+  become: yes
+  tasks:
+    - name: Install dependencies
+      apt:
+        name: [ca-certificates, curl]
+        state: present
+        update_cache: yes
+
+    - name: Download cloudflared package
+      get_url:
+        url: "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb"
+        dest: /tmp/cloudflared.deb
+        mode: '0644'
+
+    - name: Install cloudflared
+      apt:
+        deb: /tmp/cloudflared.deb
+
+    - name: Create cloudflared config directory
+      file:
+        path: /etc/cloudflared
+        state: directory
+        mode: '0750'
+
+    # Kept out of the unit file and out of argv: cloudflared reads TUNNEL_TOKEN
+    # from the environment, so `ps` never shows the token.
+    - name: Write tunnel token
+      copy:
+        dest: /etc/cloudflared/env
+        content: |
+          TUNNEL_TOKEN={{ tunnel_token }}
+        mode: '0600'
+      no_log: true
+      notify: Restart cloudflared
+
+    - name: Install cloudflared service
+      copy:
+        dest: /etc/systemd/system/cloudflared.service
+        content: |
+          [Unit]
+          Description=cloudflared
+          After=network-online.target
+          Wants=network-online.target
+          [Service]
+          EnvironmentFile=/etc/cloudflared/env
+          ExecStart=/usr/bin/cloudflared --no-autoupdate tunnel run
+          Restart=always
+          RestartSec=5
+          [Install]
+          WantedBy=multi-user.target
+      notify: Restart cloudflared
+
+    - name: Enable and start cloudflared
+      systemd:
+        name: cloudflared
+        state: started
+        enabled: yes
+        daemon_reload: yes
+
+  handlers:
+    - name: Restart cloudflared
+      systemd:
+        name: cloudflared
+        state: restarted
+        daemon_reload: yes
