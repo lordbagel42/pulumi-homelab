@@ -151,7 +151,9 @@ export function register(ctx: ServiceContext) {
     // hello-world.nomad.hcl has sat next to this file serving hellonomad.raygen.dev
     // in its tags while no code ever submitted it. Register it as a tracked job so
     // refresh notices when it goes missing, the way the oracle jobs and lookout are.
-    const nomadProvider = new nomad.Provider("homelab-nomad", {
+    // Not "homelab-nomad" — nomad/lookout/index.ts already owns that name, and a
+    // second provider with it collides on URN.
+    const nomadProvider = new nomad.Provider("hashistack-nomad", {
         address: `http://${NOMAD_IP}:4646`,
     }, { dependsOn: [nomadProvision] });
 
