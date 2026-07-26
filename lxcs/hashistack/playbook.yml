@@ -139,6 +139,11 @@
                 address: "127.0.0.1:8500"
       when: role == 'traefik'
 
+    # Consul takes -config-dir; Nomad has no such flag and takes -config
+    # (which accepts a directory too). Using -config-dir for both meant nomad
+    # exited 1 with "flag provided but not defined: -config-dir" ~300ms after
+    # every start, so the nomad server never listened on 4646 and every
+    # nomad:index:Job in the stack failed with "connection refused".
     - name: Setup systemd services
       copy:
         dest: "/etc/systemd/system/{{ item }}.service"
@@ -148,7 +153,7 @@
           After=network-online.target
           Wants=network-online.target
           [Service]
-          ExecStart=/usr/local/bin/{{ item }} agent -config-dir=/etc/{{ item }}.d/
+          ExecStart=/usr/local/bin/{{ item }} agent {{ '-config-dir' if item == 'consul' else '-config' }}=/etc/{{ item }}.d/
           Restart=always
           [Install]
           WantedBy=multi-user.target
