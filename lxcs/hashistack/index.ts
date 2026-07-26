@@ -45,6 +45,9 @@ export function register(ctx: ServiceContext) {
             consul_version: CONSUL_VERSION
         },
         dependsOn: [consulMachine],
+        // 201/202/203 were destroyed and rebuilt bare on update 167; bump to
+        // reinstall consul/nomad/traefik on the new containers.
+        generation: 1,
     });
     ctx.commands.set("consul-setup", consulProvision);
 
@@ -77,6 +80,7 @@ export function register(ctx: ServiceContext) {
             nomad_version: NOMAD_VERSION
         },
         dependsOn: [nomadMachine, consulProvision],
+        generation: 1,
     });
     ctx.commands.set("nomad-setup", nomadProvision);
 
@@ -104,6 +108,7 @@ export function register(ctx: ServiceContext) {
             traefik_version: TRAEFIK_VERSION
         },
         dependsOn: [traefikMachine, nomadProvision],
+        generation: 1,
     });
     ctx.commands.set("traefik-setup", traefikProvision);
 }

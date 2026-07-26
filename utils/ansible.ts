@@ -12,6 +12,16 @@ export interface AnsibleProvisionArgs {
     extraVars?: Record<string, any>;
     /** SSH private key for authentication */
     sshPrivateKey: pulumi.Output<string>;
+    /**
+     * Bump to force the playbook to run again.
+     *
+     * Provisioning lives in a command.local.Command, and replacing the target
+     * machine does NOT invalidate it — the container's Pulumi id is just its
+     * vmId, so it is unchanged across a rebuild. A freshly rebuilt guest is
+     * therefore treated as already provisioned. Until that is modelled properly,
+     * this is the knob for "the machine was rebuilt, install everything again".
+     */
+    generation?: string | number;
     /** Resources that must be ready before provisioning starts */
     dependsOn?: pulumi.Input<pulumi.Resource> | pulumi.Input<pulumi.Resource>[];
 }
@@ -84,6 +94,10 @@ fi
 
 ansible-playbook -i "$inventory" "${args.playbookPath}" --extra-vars "@$vars"
         `.trim(),
-        triggers: [playbookHash, extraVarsFingerprint(args.extraVars ?? {})],
+        triggers: [
+            playbookHash,
+            extraVarsFingerprint(args.extraVars ?? {}),
+            String(args.generation ?? 0),
+        ],
     }, { dependsOn: args.dependsOn });
 }

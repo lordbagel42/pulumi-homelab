@@ -82,33 +82,20 @@ jobs:
       #
       # Everything else still gets a normal up, so the nomad jobs are recreated
       # once nomad-server is actually serving again.
-      - name: Pulumi up (replacing hashistack provisioners)
+      # No --replace / URN targeting needed any more: hashistack's provisioners
+      # now carry `generation: 1`, which changes their triggers, so a plain up
+      # re-runs them against the rebuilt containers. Targeting by hand-built URN
+      # was rejected outright, and reading URNs from `pulumi stack export`
+      # matched nothing, so the trigger is both simpler and the correct fix.
+      - name: Pulumi up
+        uses: pulumi/actions@v6
+        with:
+          command: up
+          stack-name: homelab
+          comment-on-summary: true
         env:
           PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
           HOSTED: "true"
-        run: |
-          set -uo pipefail
-
-          # Read the real URNs out of state — hand-built ones were rejected with
-          # "could not be found in the stack".
-          mapfile -t urns < <(
-            pulumi stack export --stack homelab \
-              | jq -r '.deployment.resources[]?
-                       | select(.type == "command:local/command:Command")
-                       | select(.urn | test("::(consul|nomad|traefik)-provision$"))
-                       | .urn'
-          )
-
-          echo "Found ${#urns[@]} provisioner URNs:"
-          printf '  %s\n' "${urns[@]}"
-          if [ "${#urns[@]}" -eq 0 ]; then
-            echo "::error::no provisioner URNs matched; refusing to guess"
-            exit 1
-          fi
-
-          args=()
-          for u in "${urns[@]}"; do args+=(--replace "$u"); done
-          pulumi up --yes --stack homelab --non-interactive "${args[@]}"
 
       - name: Disconnect Netbird
         if: always()
