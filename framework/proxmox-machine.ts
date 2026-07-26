@@ -83,7 +83,23 @@ export class ProxmoxMachine extends pulumi.ComponentResource {
                 tags: args.tags || [],
                 startOnBoot: true,
                 started: true,
-            }, { parent: this, ...opts });
+                // `initialization` is replace-on-change for ContainerLegacy, and
+                // Pulumi diffs STATE against config — not the live guest. Adding
+                // `dns` above therefore made every already-existing container a
+                // replacement, which destroyed consul-server/nomad-server/traefik
+                // (201/202/203) on update 167 before it errored.
+                //
+                // Newly created containers still get the full initialization
+                // block, including dns, because ignoreChanges only suppresses
+                // diffs on resources that already exist. Existing containers keep
+                // their `nameserver` (already set out-of-band) instead of being
+                // rebuilt — which matters enormously for dokploy's Docker volumes
+                // and authentik's Postgres.
+            }, {
+                parent: this,
+                ...opts,
+                ignoreChanges: [...(opts?.ignoreChanges ?? []), "initialization"],
+            });
         } else {
             this.machine = new proxmox.VmLegacy(name, {
                 nodeName: args.nodeName || "optiplex",

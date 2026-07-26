@@ -198,7 +198,9 @@ for (const lxc of lxcs) {
             startOnBoot: true,
             started: true,
         },
-        { provider },
+        // See ProxmoxMachine: initialization is replace-on-change, so a diff here
+        // destroys and rebuilds a live container.
+        { provider, ignoreChanges: ["initialization"] },
     );
 }
 
