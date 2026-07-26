@@ -1,0 +1,122 @@
+name: Cloudflared diagnosis (read-only)
+
+# Why won't CT 204 start, and what is actually serving public traffic?
+# All 7 public hostnames currently return Cloudflare 530 (no tunnel connector).
+# Read-only: pulls the failed vzstart task log, CT 204's config, and nomad job
+# and allocation state. Delete once cloudflared is sorted.
+
+on:
+  push:
+    branches:
+      - claude/failed-deployment-recovery-fa5moq
+  workflow_dispatch:
+
+concurrency:
+  group: homelab-cf-diag
+  cancel-in-progress: true
+
+jobs:
+  diag:
+    name: Diagnose
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Netbird
+        run: curl -fsSL https://pkgs.netbird.io/install.sh | sudo bash
+
+      - name: Connect Netbird
+        env:
+          NB_SETUP_KEY: ${{ secrets.NB_SETUP_KEY }}
+        run: sudo netbird up --setup-key "$NB_SETUP_KEY"
+
+      - name: Wait for Netbird peer connection
+        run: |
+          for i in $(seq 1 30); do
+            if sudo netbird status | grep -q "Connected"; then echo connected; exit 0; fi
+            sleep 2
+          done
+          echo "::error::Netbird failed to connect"; exit 1
+
+      - name: Install Pulumi CLI
+        uses: pulumi/actions@v6
+
+      - name: CT 204 config and start-failure task logs
+        if: always()
+        timeout-minutes: 6
+        env:
+          PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
+        run: |
+          set -uo pipefail
+          get() { pulumi config get "$1" --stack homelab 2>/dev/null || true; }
+          ENDPOINT="$(get PROXMOX_NETBIRD_ENDPOINT)"
+          PVE_USER="$(get PROXMOX_USERNAME)"
+          PVE_PASS="$(get PROXMOX_PASSWORD)"
+          HOST="$(printf '%s' "$ENDPOINT" | sed -E 's#^https?://##; s#/.*$##')"
+          echo "::add-mask::$HOST"; echo "::add-mask::${HOST%%:*}"
+          [ -n "$PVE_PASS" ] && echo "::add-mask::$PVE_PASS"
+          [ -n "$PVE_USER" ] && echo "::add-mask::$PVE_USER"
+          API="https://${HOST%%:*}:8006"
+
+          T=$(curl -sk --max-time 20 -d "username=$PVE_USER" --data-urlencode "password=$PVE_PASS" \
+                "$API/api2/json/access/ticket" | jq -r '.data.ticket // empty')
+          if [ -z "$T" ]; then echo "::error::Proxmox API login failed"; exit 1; fi
+          echo "::add-mask::$T"
+          api() { curl -sk --max-time 25 -H "Cookie: PVEAuthCookie=$T" "$API/api2/json$1"; }
+
+          echo "===== CT 204 config ====="
+          api "/nodes/optiplex/lxc/204/config" \
+            | jq -r '.data | to_entries[] | select(.key|test("password|ssh-public-keys")|not) | "\(.key) = \(.value)"' | sort
+
+          echo
+          echo "===== CT 204 current status ====="
+          api "/nodes/optiplex/lxc/204/status/current" | jq -c '.data'
+
+          echo
+          echo "===== recent vzstart/vzdestroy tasks for 204 ====="
+          api "/nodes/optiplex/tasks?limit=200&vmid=204" \
+            | jq -r '.data[]? | "\(.upid)\t\(.type)\t\(.status // "running")"' | head -20
+
+          echo
+          echo "===== log of most recent failed vzstart for 204 ====="
+          upid=$(api "/nodes/optiplex/tasks?limit=200&vmid=204" \
+                 | jq -r '[.data[]? | select(.type=="vzstart") | select((.status // "") != "OK")][0].upid // empty')
+          if [ -z "$upid" ]; then
+            echo "(no failed vzstart task found in recent history)"
+          else
+            echo "UPID: $upid"
+            api "/nodes/optiplex/tasks/$(printf '%s' "$upid" | jq -sRr @uri)/log?limit=200" \
+              | jq -r '.data[]?.t'
+          fi
+
+      - name: Nomad jobs and cloudflared allocations
+        if: always()
+        timeout-minutes: 4
+        run: |
+          set -uo pipefail
+          n() { curl -sS --max-time 12 "http://192.168.0.202:4646$1"; }
+
+          echo "===== nomad leader / nodes ====="
+          n /v1/status/leader; echo
+          n /v1/nodes | jq -r '.[]? | "\(.Name)\tdc=\(.Datacenter)\tstatus=\(.Status)\telev=\(.SchedulingEligibility)"' || echo "(nodes query failed)"
+
+          echo
+          echo "===== jobs ====="
+          n /v1/jobs | jq -r '.[]? | "\(.ID)\tdc=\(.Datacenters|join(","))\tstatus=\(.Status)\trunning=\(.JobSummary.Summary|to_entries|map(.value.Running)|add)"' || echo "(jobs query failed)"
+
+          echo
+          echo "===== cloudflared allocations ====="
+          n /v1/job/oracle-cloudflared/allocations \
+            | jq -r '.[]? | "\(.ID[0:8])\tclient=\(.ClientStatus)\tdesired=\(.DesiredStatus)\tnode=\(.NodeName)\tevents=\((.TaskStates.cloudflared.Events // [])|map(.Type)|join(","))"' \
+            || echo "(no oracle-cloudflared job)"
+
+          echo
+          echo "===== traefik router errors (homelab) ====="
+          curl -sS --max-time 12 http://192.168.0.203:8080/api/overview | jq -c '.http' || true
+          curl -sS --max-time 12 http://192.168.0.203:8080/api/http/routers \
+            | jq -r '.[]? | select((.error // []) | length > 0) | "\(.name)\t\(.error|join("; "))"' || true
+
+      - name: Disconnect Netbird
+        if: always()
+        run: sudo netbird down
