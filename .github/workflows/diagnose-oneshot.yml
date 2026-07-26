@@ -1,0 +1,207 @@
+name: Diagnose Homelab (one-shot)
+
+# Temporary diagnostic workflow. Runs on push to the recovery branch so we can
+# read live homelab state (Proxmox host + LXC network/apt/service health) from a
+# runner that has Netbird access. Delete once the deploy is healthy again.
+
+on:
+  push:
+    branches:
+      - claude/failed-deployment-recovery-fa5moq
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    name: Diagnose
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Netbird
+        run: curl -fsSL https://pkgs.netbird.io/install.sh | sudo bash
+
+      - name: Connect Netbird
+        env:
+          NB_SETUP_KEY: ${{ secrets.NB_SETUP_KEY }}
+        run: |
+          if [ -z "$NB_SETUP_KEY" ]; then
+            echo "::error::NB_SETUP_KEY secret is not set"
+            exit 1
+          fi
+          sudo netbird up --setup-key "$NB_SETUP_KEY"
+
+      - name: Wait for Netbird peer connection
+        run: |
+          for i in $(seq 1 30); do
+            if sudo netbird status | grep -q "Connected"; then
+              echo "Netbird connected"
+              exit 0
+            fi
+            echo "Waiting for Netbird... ($i/30)"
+            sleep 2
+          done
+          echo "::error::Netbird failed to connect"
+          exit 1
+
+      - name: Install Pulumi CLI
+        uses: pulumi/actions@v6
+
+      - name: Resolve stack config
+        id: cfg
+        env:
+          PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
+        run: |
+          set -euo pipefail
+          get() {
+            pulumi config get "$1" --stack homelab 2>/dev/null || true
+          }
+          ENDPOINT="$(get PROXMOX_NETBIRD_ENDPOINT)"
+          PVE_USER="$(get PROXMOX_USERNAME)"
+          PVE_PASS="$(get PROXMOX_PASSWORD)"
+          SSH_KEY="$(get SSH_PRIVATE_KEY)"
+
+          if [ -z "$ENDPOINT" ]; then
+            echo "::error::could not read PROXMOX_NETBIRD_ENDPOINT from stack config"
+            exit 1
+          fi
+
+          HOST="$(printf '%s' "$ENDPOINT" | sed -E 's#^https?://##; s#[:/].*$##')"
+          echo "::add-mask::$HOST"
+          echo "::add-mask::$PVE_PASS"
+          [ -n "$PVE_USER" ] && echo "::add-mask::$PVE_USER"
+
+          echo "$SSH_KEY" > /tmp/id_pve
+          chmod 600 /tmp/id_pve
+
+          {
+            echo "host=$HOST"
+            echo "pve_user=${PVE_USER%%@*}"
+          } >> "$GITHUB_OUTPUT"
+          echo "PVE_PASS=$PVE_PASS" >> "$GITHUB_ENV"
+          echo "Resolved Proxmox host (masked), ssh user: ${PVE_USER%%@*}"
+
+      - name: Install sshpass
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass
+
+      - name: Probe Proxmox host reachability
+        env:
+          PVE_HOST: ${{ steps.cfg.outputs.host }}
+        run: |
+          set -x
+          ping -c 3 -W 3 "$PVE_HOST" || true
+          nc -zv -w 5 "$PVE_HOST" 22 || true
+          nc -zv -w 5 "$PVE_HOST" 8006 || true
+
+      - name: Collect diagnostics from Proxmox host
+        env:
+          PVE_HOST: ${{ steps.cfg.outputs.host }}
+          PVE_USER: ${{ steps.cfg.outputs.pve_user }}
+        run: |
+          set -uo pipefail
+
+          cat > /tmp/remote-diag.sh <<'REMOTE'
+          set -u
+          hr() { echo; echo "===== $* ====="; }
+
+          hr pveversion
+          pveversion || true
+
+          hr "cluster nodes"
+          pvecm nodes 2>/dev/null || echo "(not a cluster / pvecm unavailable)"
+
+          hr "pct list"
+          pct list || true
+
+          hr "qm list"
+          qm list || true
+
+          hr "storage status"
+          pvesm status || true
+
+          hr "/var/lib/vz/import"
+          ls -la /var/lib/vz/import/ 2>/dev/null || echo "(missing)"
+
+          hr "/var/lib/vz/template/cache (lxc templates)"
+          ls -la /var/lib/vz/template/cache/ 2>/dev/null || echo "(missing)"
+
+          hr "host DNS + connectivity"
+          cat /etc/resolv.conf || true
+          getent hosts deb.debian.org || echo "HOST DNS FAILURE for deb.debian.org"
+          getent hosts cloud.debian.org || echo "HOST DNS FAILURE for cloud.debian.org"
+          curl -sS -o /dev/null -w 'cloud.debian.org HTTP %{http_code} in %{time_total}s\n' \
+            --max-time 20 -I https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-genericcloud-amd64.qcow2 \
+            || echo "HOST cannot reach cloud.debian.org"
+
+          for id in 201 202 203 204 211 220 230 231; do
+            hr "CT $id"
+            if ! pct config "$id" >/dev/null 2>&1; then
+              echo "(container $id does not exist)"
+              continue
+            fi
+            pct config "$id" | grep -vi -E 'password|ssh-public-keys' || true
+            echo "--- status"
+            pct status "$id" || true
+            if pct status "$id" 2>/dev/null | grep -q running; then
+              echo "--- resolv.conf"
+              pct exec "$id" -- cat /etc/resolv.conf 2>&1 | head -20 || true
+              echo "--- ip addr / route"
+              pct exec "$id" -- ip -4 addr show 2>&1 | head -20 || true
+              pct exec "$id" -- ip route 2>&1 | head -10 || true
+              echo "--- ping gateway"
+              pct exec "$id" -- ping -c 2 -W 3 192.168.0.1 2>&1 | tail -3 || true
+              echo "--- ping 1.1.1.1"
+              pct exec "$id" -- ping -c 2 -W 3 1.1.1.1 2>&1 | tail -3 || true
+              echo "--- dns lookup deb.debian.org"
+              pct exec "$id" -- getent hosts deb.debian.org 2>&1 | head -5 || echo "DNS FAILURE in CT $id"
+              echo "--- apt sources"
+              pct exec "$id" -- sh -c 'cat /etc/apt/sources.list 2>/dev/null; cat /etc/apt/sources.list.d/*.sources 2>/dev/null; cat /etc/apt/sources.list.d/*.list 2>/dev/null' 2>&1 | head -40 || true
+              echo "--- apt-get update (tail)"
+              pct exec "$id" -- apt-get update 2>&1 | tail -25 || true
+              echo "--- services"
+              pct exec "$id" -- systemctl is-active consul nomad traefik docker 2>&1 | head -10 || true
+              echo "--- binaries"
+              pct exec "$id" -- ls -la /usr/local/bin/ 2>&1 | head -15 || true
+            fi
+          done
+
+          hr "VM 100 (pbs) status"
+          qm status 100 2>&1 || echo "(no vm 100)"
+          REMOTE
+
+          run_remote() {
+            if ssh -i /tmp/id_pve -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
+                 -o BatchMode=yes "$PVE_USER@$PVE_HOST" 'bash -s' < /tmp/remote-diag.sh; then
+              return 0
+            fi
+            echo "(key auth failed, trying password auth)"
+            sshpass -p "$PVE_PASS" ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
+              -o PreferredAuthentications=password -o PubkeyAuthentication=no \
+              "$PVE_USER@$PVE_HOST" 'bash -s' < /tmp/remote-diag.sh
+          }
+
+          run_remote 2>&1 | tee /tmp/diag.txt
+          echo "exit: $?"
+
+      - name: Direct probes from runner
+        run: |
+          set -x
+          for ip in 192.168.0.201 192.168.0.202 192.168.0.203 192.168.0.211 192.168.0.220; do
+            ping -c 2 -W 3 "$ip" || true
+          done
+          nc -zv -w 5 192.168.0.201 8500 || true
+          nc -zv -w 5 192.168.0.202 4646 || true
+          nc -zv -w 5 192.168.0.203 80 || true
+          curl -sS --max-time 10 http://192.168.0.202:4646/v1/status/leader || echo "nomad unreachable"
+          curl -sS --max-time 10 http://192.168.0.201:8500/v1/status/leader || echo "consul unreachable"
+
+      - name: Upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: homelab-diagnostics
+          path: /tmp/diag.txt
+          if-no-files-found: warn
+
+      - name: Disconnect Netbird
+        if: always()
+        run: sudo netbird down
