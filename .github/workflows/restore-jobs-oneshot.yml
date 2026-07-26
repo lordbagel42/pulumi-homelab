@@ -1,0 +1,114 @@
+name: Restore nomad jobs (one-shot)
+
+# Public ingress is down (all hostnames return Cloudflare 530) because nomad has
+# ZERO jobs registered — including oracle-cloudflared, the tunnel connector,
+# which was Running:1 earlier today. Rebuilding nomad-server wiped the raft
+# state holding every registration, and the earlier recovery refresh could not
+# reach nomad ("no route to host") so those job resources stayed in Pulumi state
+# as though they still existed.
+#
+# Nomad is reachable now, so refresh correctly marks them absent and up
+# recreates them. Then verify the public hostnames end-to-end.
+#
+# Delete once public access is confirmed restored.
+
+on:
+  push:
+    branches:
+      - claude/failed-deployment-recovery-fa5moq
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-infra
+
+jobs:
+  restore:
+    name: Refresh, up, verify public
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.22.2"
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Install Netbird
+        run: curl -fsSL https://pkgs.netbird.io/install.sh | sudo bash
+
+      - name: Connect Netbird
+        env:
+          NB_SETUP_KEY: ${{ secrets.NB_SETUP_KEY }}
+        run: sudo netbird up --setup-key "$NB_SETUP_KEY"
+
+      - name: Wait for Netbird peer connection
+        run: |
+          for i in $(seq 1 30); do
+            if sudo netbird status | grep -q "Connected"; then echo connected; exit 0; fi
+            sleep 2
+          done
+          echo "::error::Netbird failed to connect"; exit 1
+
+      - name: Nomad job count before
+        run: |
+          curl -sS --max-time 12 http://192.168.0.202:4646/v1/jobs | jq 'length' || true
+
+      # Nomad answers now, so this run genuinely reconciles the job resources
+      # instead of erroring on them.
+      - name: Pulumi refresh
+        uses: pulumi/actions@v6
+        with:
+          command: refresh
+          stack-name: homelab
+        env:
+          PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
+          HOSTED: "true"
+
+      - name: Pulumi up
+        uses: pulumi/actions@v6
+        with:
+          command: up
+          stack-name: homelab
+          comment-on-summary: true
+        env:
+          PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
+          HOSTED: "true"
+
+      - name: Nomad jobs and cloudflared allocation after
+        if: always()
+        run: |
+          set -uo pipefail
+          n() { curl -sS --max-time 15 "http://192.168.0.202:4646$1"; }
+          echo "===== jobs ====="
+          n /v1/jobs | jq -r '.[]? | "\(.ID)\tdc=\(.Datacenters|join(","))\tstatus=\(.Status)"' || true
+          echo
+          echo "===== oracle-cloudflared allocations ====="
+          n /v1/job/oracle-cloudflared/allocations \
+            | jq -r '.[]? | "\(.ID[0:8])\tclient=\(.ClientStatus)\tnode=\(.NodeName)"' || true
+
+      - name: Verify public hostnames
+        if: always()
+        run: |
+          set -uo pipefail
+          # cloudflared needs a moment to connect and register the tunnel.
+          sleep 45
+          rc=0
+          for h in auth.bagelindustries.com consul.bagelindustries.com \
+                   nomad.bagelindustries.com demo.bagelindustries.com \
+                   dokploy.raygen.dev hellonomad.raygen.dev lookout.raygen.dev; do
+            code=$(curl -sS -o /dev/null -m 20 -w '%{http_code}' "https://$h/" 2>/dev/null || echo 000)
+            printf '%-34s HTTP %s\n' "$h" "$code"
+            # 530 means no tunnel connector; anything else means ingress works
+            # (401/403/404 from authentik or traefik are fine here).
+            case "$code" in 530|000) rc=1 ;; esac
+          done
+          if [ "$rc" -ne 0 ]; then
+            echo "::warning::at least one hostname still has no working tunnel"
+          fi
+
+      - name: Disconnect Netbird
+        if: always()
+        run: sudo netbird down
