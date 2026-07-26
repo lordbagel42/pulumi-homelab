@@ -1,0 +1,144 @@
+name: Unstick the nomad client (one-shot)
+
+# Routing is fixed and verified: auth 302, consul 301, nomad 307, demo 302,
+# dokploy 307 — identical through traefik and through the tunnel.
+#
+# The two that still 404 (hellonomad, lookout) are both nomad workloads on the
+# client at .230, and neither has a traefik router because neither is actually
+# running, so their consul health checks are critical and traefik drops them.
+#
+# The client is the common cause. It is `active`, eligible, ready, has the
+# lookout_pgdata host volume and 29G free — but its journal ends at 12:33:21
+# today with:
+#     rpc error: Permission denied           (Node.UpdateAlloc)
+#     rpc error: node not found              (Node.UpdateStatus)
+#     client: re-registering node
+#     client: node registration complete
+# and nothing since. Wiping the nomad-server raft state invalidated this node's
+# record; the client re-registered but has not processed an allocation since,
+# logging nothing while lookout sat pending for nine hours and demo/hello-world
+# were submitted minutes ago.
+#
+# Restarting the client makes it re-sync allocations from the server. Nothing is
+# running on it, so there is nothing to lose by bouncing it.
+#
+# Delete once lookout and hellonomad are serving.
+
+on:
+  push:
+    branches:
+      - claude/failed-deployment-recovery-fa5moq
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-infra
+
+jobs:
+  unstick:
+    name: Restart the nomad client and verify the last two hostnames
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.22.2"
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Install Netbird
+        run: curl -fsSL https://pkgs.netbird.io/install.sh | sudo bash
+
+      - name: Connect Netbird
+        env:
+          NB_SETUP_KEY: ${{ secrets.NB_SETUP_KEY }}
+        run: sudo netbird up --setup-key "$NB_SETUP_KEY"
+
+      - name: Wait for Netbird peer connection
+        run: |
+          for i in $(seq 1 30); do
+            if sudo netbird status | grep -q "Connected"; then echo connected; exit 0; fi
+            sleep 2
+          done
+          echo "::error::Netbird failed to connect"; exit 1
+
+      - name: Fetch SSH key
+        env:
+          PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
+        run: |
+          pulumi config get SSH_PRIVATE_KEY --stack homelab > /tmp/id_pve 2>/dev/null || true
+          chmod 600 /tmp/id_pve
+          [ -s /tmp/id_pve ] || { echo "::error::no ssh key available"; exit 1; }
+
+      - name: Allocations before
+        run: |
+          set -uo pipefail
+          for j in lookout hello-world demo; do
+            printf '%-12s ' "$j"
+            curl -sS --max-time 15 "http://192.168.0.202:4646/v1/job/$j/allocations" \
+              | jq -r '[.[]? | "\(.ID[0:8]):\(.ClientStatus)"] | join(" ")' || echo "(failed)"
+          done
+
+      - name: Restart nomad on the client
+        run: |
+          set -uo pipefail
+          timeout -k 5 120 ssh -i /tmp/id_pve -o StrictHostKeyChecking=no \
+            -o ConnectTimeout=8 -o BatchMode=yes root@192.168.0.230 '
+              systemctl restart nomad
+              sleep 20
+              echo "--- state ---"
+              systemctl is-active nomad
+              echo "--- fresh client log ---"
+              journalctl -u nomad --no-pager --since "-2min" | tail -40
+            ' 2>&1 || echo "(ssh to 192.168.0.230 failed)"
+
+      - name: Wait for allocations to start
+        run: |
+          set -uo pipefail
+          for i in $(seq 1 30); do
+            running=$(curl -sS --max-time 15 "http://192.168.0.202:4646/v1/job/hello-world/allocations" \
+                        | jq -r '[.[]? | select(.ClientStatus == "running")] | length' 2>/dev/null || echo 0)
+            echo "attempt $i: hello-world running allocs = $running"
+            [ "$running" -ge 1 ] && break
+            sleep 10
+          done
+
+      - name: Allocations after
+        if: always()
+        run: |
+          set -uo pipefail
+          for j in lookout hello-world demo; do
+            echo "===== $j ====="
+            curl -sS --max-time 15 "http://192.168.0.202:4646/v1/job/$j/allocations" \
+              | jq -r '.[]? | "\(.ID[0:8]) client=\(.ClientStatus) desc=\(.ClientDescription // "-")",
+                        (.TaskStates // {} | to_entries[]? |
+                          "   task=\(.key) state=\(.value.State) failed=\(.value.Failed)",
+                          (.value.Events // [] | .[-3:][]? | "      \(.Type): \(.DisplayMessage // "")"))' \
+              || echo "(failed)"
+          done
+
+      - name: Routers and final verification
+        if: always()
+        run: |
+          set -uo pipefail
+          echo "===== routers ====="
+          curl -sS --max-time 20 http://192.168.0.203:8080/api/http/routers \
+            | jq -r '.[]? | "\(.name)\tstatus=\(.status)\trule=\(.rule)"' || true
+          echo
+          echo "===== public ====="
+          rc=0
+          for h in auth.bagelindustries.com consul.bagelindustries.com \
+                   nomad.bagelindustries.com demo.bagelindustries.com \
+                   dokploy.raygen.dev hellonomad.raygen.dev lookout.raygen.dev; do
+            code=$(curl -sS -o /dev/null -m 20 -w '%{http_code}' "https://$h/" 2>/dev/null || echo 000)
+            printf '%-34s HTTP %s\n' "$h" "$code"
+            case "$code" in 404|530|000) rc=1 ;; esac
+          done
+          [ "$rc" -ne 0 ] && echo "::warning::at least one hostname is still not routing"
+          exit 0
+
+      - name: Disconnect Netbird
+        if: always()
+        run: sudo netbird down
