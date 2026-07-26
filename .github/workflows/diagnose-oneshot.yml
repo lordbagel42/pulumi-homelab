@@ -51,148 +51,124 @@ jobs:
         env:
           PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
         run: |
-          set -euo pipefail
-          get() {
-            pulumi config get "$1" --stack homelab 2>/dev/null || true
-          }
+          set -uo pipefail
+          get() { pulumi config get "$1" --stack homelab 2>/dev/null || true; }
+
           ENDPOINT="$(get PROXMOX_NETBIRD_ENDPOINT)"
           PVE_USER="$(get PROXMOX_USERNAME)"
           PVE_PASS="$(get PROXMOX_PASSWORD)"
-          SSH_KEY="$(get SSH_PRIVATE_KEY)"
+          get SSH_PRIVATE_KEY > /tmp/id_pve
+          chmod 600 /tmp/id_pve
 
-          if [ -z "$ENDPOINT" ]; then
-            echo "::error::could not read PROXMOX_NETBIRD_ENDPOINT from stack config"
-            exit 1
-          fi
-
-          HOST="$(printf '%s' "$ENDPOINT" | sed -E 's#^https?://##; s#[:/].*$##')"
+          HOST="$(printf '%s' "$ENDPOINT" | sed -E 's#^https?://##; s#/.*$##')"
           echo "::add-mask::$HOST"
+          echo "::add-mask::${HOST%%:*}"
           echo "::add-mask::$PVE_PASS"
           [ -n "$PVE_USER" ] && echo "::add-mask::$PVE_USER"
 
-          echo "$SSH_KEY" > /tmp/id_pve
-          chmod 600 /tmp/id_pve
+          echo "ssh key bytes: $(wc -c < /tmp/id_pve)"
+          echo "ssh key type: $(head -1 /tmp/id_pve | tr -dc 'A-Za-z -')"
+          echo "endpoint host resolved (masked); pve api user local part: ${PVE_USER%%@*}"
 
           {
-            echo "host=$HOST"
-            echo "pve_user=${PVE_USER%%@*}"
+            echo "api=https://${HOST%%:*}:8006"
+            echo "host=${HOST%%:*}"
+            echo "pve_user=$PVE_USER"
           } >> "$GITHUB_OUTPUT"
           echo "PVE_PASS=$PVE_PASS" >> "$GITHUB_ENV"
-          echo "Resolved Proxmox host (masked), ssh user: ${PVE_USER%%@*}"
 
-      - name: Install sshpass
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq sshpass
-
-      - name: Probe Proxmox host reachability
+      - name: Proxmox API — nodes, containers, VMs, storage
+        if: always()
         env:
-          PVE_HOST: ${{ steps.cfg.outputs.host }}
-        run: |
-          set -x
-          ping -c 3 -W 3 "$PVE_HOST" || true
-          nc -zv -w 5 "$PVE_HOST" 22 || true
-          nc -zv -w 5 "$PVE_HOST" 8006 || true
-
-      - name: Collect diagnostics from Proxmox host
-        env:
-          PVE_HOST: ${{ steps.cfg.outputs.host }}
+          PVE_API: ${{ steps.cfg.outputs.api }}
           PVE_USER: ${{ steps.cfg.outputs.pve_user }}
         run: |
           set -uo pipefail
+          TICKET_JSON=$(curl -sk --max-time 20 -d "username=$PVE_USER" --data-urlencode "password=$PVE_PASS" \
+            "$PVE_API/api2/json/access/ticket")
+          TICKET=$(printf '%s' "$TICKET_JSON" | jq -r '.data.ticket // empty')
+          if [ -z "$TICKET" ]; then
+            echo "::warning::Proxmox API login failed: $(printf '%s' "$TICKET_JSON" | head -c 300)"
+            exit 0
+          fi
+          echo "::add-mask::$TICKET"
+          api() { curl -sk --max-time 25 -H "Cookie: PVEAuthCookie=$TICKET" "$PVE_API/api2/json$1"; }
 
-          cat > /tmp/remote-diag.sh <<'REMOTE'
-          set -u
-          hr() { echo; echo "===== $* ====="; }
+          echo "===== nodes ====="
+          api /nodes | jq -r '.data[] | "\(.node)\tstatus=\(.status)\tuptime=\(.uptime)\tmem=\(.mem)/\(.maxmem)"'
 
-          hr pveversion
-          pveversion || true
-
-          hr "cluster nodes"
-          pvecm nodes 2>/dev/null || echo "(not a cluster / pvecm unavailable)"
-
-          hr "pct list"
-          pct list || true
-
-          hr "qm list"
-          qm list || true
-
-          hr "storage status"
-          pvesm status || true
-
-          hr "/var/lib/vz/import"
-          ls -la /var/lib/vz/import/ 2>/dev/null || echo "(missing)"
-
-          hr "/var/lib/vz/template/cache (lxc templates)"
-          ls -la /var/lib/vz/template/cache/ 2>/dev/null || echo "(missing)"
-
-          hr "host DNS + connectivity"
-          cat /etc/resolv.conf || true
-          getent hosts deb.debian.org || echo "HOST DNS FAILURE for deb.debian.org"
-          getent hosts cloud.debian.org || echo "HOST DNS FAILURE for cloud.debian.org"
-          curl -sS -o /dev/null -w 'cloud.debian.org HTTP %{http_code} in %{time_total}s\n' \
-            --max-time 20 -I https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-genericcloud-amd64.qcow2 \
-            || echo "HOST cannot reach cloud.debian.org"
-
-          for id in 201 202 203 204 211 220 230 231; do
-            hr "CT $id"
-            if ! pct config "$id" >/dev/null 2>&1; then
-              echo "(container $id does not exist)"
-              continue
-            fi
-            pct config "$id" | grep -vi -E 'password|ssh-public-keys' || true
-            echo "--- status"
-            pct status "$id" || true
-            if pct status "$id" 2>/dev/null | grep -q running; then
-              echo "--- resolv.conf"
-              pct exec "$id" -- cat /etc/resolv.conf 2>&1 | head -20 || true
-              echo "--- ip addr / route"
-              pct exec "$id" -- ip -4 addr show 2>&1 | head -20 || true
-              pct exec "$id" -- ip route 2>&1 | head -10 || true
-              echo "--- ping gateway"
-              pct exec "$id" -- ping -c 2 -W 3 192.168.0.1 2>&1 | tail -3 || true
-              echo "--- ping 1.1.1.1"
-              pct exec "$id" -- ping -c 2 -W 3 1.1.1.1 2>&1 | tail -3 || true
-              echo "--- dns lookup deb.debian.org"
-              pct exec "$id" -- getent hosts deb.debian.org 2>&1 | head -5 || echo "DNS FAILURE in CT $id"
-              echo "--- apt sources"
-              pct exec "$id" -- sh -c 'cat /etc/apt/sources.list 2>/dev/null; cat /etc/apt/sources.list.d/*.sources 2>/dev/null; cat /etc/apt/sources.list.d/*.list 2>/dev/null' 2>&1 | head -40 || true
-              echo "--- apt-get update (tail)"
-              pct exec "$id" -- apt-get update 2>&1 | tail -25 || true
-              echo "--- services"
-              pct exec "$id" -- systemctl is-active consul nomad traefik docker 2>&1 | head -10 || true
-              echo "--- binaries"
-              pct exec "$id" -- ls -la /usr/local/bin/ 2>&1 | head -15 || true
-            fi
+          for node in $(api /nodes | jq -r '.data[].node'); do
+            echo
+            echo "===== $node: containers ====="
+            api "/nodes/$node/lxc" | jq -r '.data[] | "CT \(.vmid)\t\(.name)\tstatus=\(.status)\tuptime=\(.uptime // 0)"' | sort -V
+            echo "===== $node: vms ====="
+            api "/nodes/$node/qemu" | jq -r '.data[] | "VM \(.vmid)\t\(.name)\tstatus=\(.status)"' | sort -V
+            echo "===== $node: storage ====="
+            api "/nodes/$node/storage" | jq -r '.data[] | "\(.storage)\ttype=\(.type)\tactive=\(.active)\tavail=\(.avail // 0)"'
+            echo "===== $node: import volumes ====="
+            api "/nodes/$node/storage/local/content?content=import" | jq -r '.data[]? | "\(.volid)\tsize=\(.size)"' || true
+            echo "===== $node: recent failed tasks ====="
+            api "/nodes/$node/tasks?limit=25&errors=1" | jq -r '.data[]? | "\(.starttime)\t\(.type)\t\(.id)\t\(.status)"' || true
           done
 
-          hr "VM 100 (pbs) status"
-          qm status 100 2>&1 || echo "(no vm 100)"
-          REMOTE
+          for id in 201 202 203 204 211 220; do
+            node=$(api /cluster/resources?type=vm | jq -r ".data[] | select(.vmid==$id) | .node" | head -1)
+            [ -z "$node" ] && continue
+            echo
+            echo "===== CT $id config (on $node) ====="
+            api "/nodes/$node/lxc/$id/config" | jq -r '.data | to_entries[] | select(.key|test("password|ssh-public-keys")|not) | "\(.key) = \(.value)"' | sort
+          done
 
-          run_remote() {
-            if ssh -i /tmp/id_pve -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
-                 -o BatchMode=yes "$PVE_USER@$PVE_HOST" 'bash -s' < /tmp/remote-diag.sh; then
-              return 0
+      - name: LXC diagnostics over direct SSH
+        if: always()
+        run: |
+          set -uo pipefail
+
+          cat > /tmp/ct-diag.sh <<'CTDIAG'
+          echo "--- os"; cat /etc/os-release | head -3
+          echo "--- resolv.conf"; cat /etc/resolv.conf
+          echo "--- ip/route"; ip -4 addr show scope global; ip route
+          echo "--- ping gateway"; ping -c 2 -W 3 192.168.0.1 2>&1 | tail -3
+          echo "--- ping 1.1.1.1"; ping -c 2 -W 3 1.1.1.1 2>&1 | tail -3
+          echo "--- dns via resolv.conf"; getent hosts deb.debian.org 2>&1 || echo "GETENT FAILED"
+          echo "--- dns via 1.1.1.1 directly"; (command -v dig >/dev/null && dig +short +time=3 @1.1.1.1 deb.debian.org) 2>&1 || echo "(no dig)"
+          echo "--- https to deb.debian.org"; curl -sS -o /dev/null -w 'HTTP %{http_code} in %{time_total}s\n' --max-time 15 https://deb.debian.org/debian/dists/trixie/Release 2>&1 || echo "CURL FAILED"
+          echo "--- apt sources"; cat /etc/apt/sources.list 2>/dev/null; cat /etc/apt/sources.list.d/* 2>/dev/null
+          echo "--- date"; date -u
+          echo "--- apt-get update"; apt-get update 2>&1 | tail -30
+          echo "--- disk"; df -h / | tail -2
+          echo "--- services"; systemctl is-active consul nomad traefik docker 2>&1
+          echo "--- failed units"; systemctl --failed --no-legend 2>&1 | head -10
+          echo "--- consul/nomad/traefik unit logs"; for u in consul nomad traefik; do
+            if systemctl list-unit-files "$u.service" >/dev/null 2>&1 && systemctl cat "$u.service" >/dev/null 2>&1; then
+              echo "  == $u =="; systemctl status "$u" --no-pager 2>&1 | head -12
+              journalctl -u "$u" -n 15 --no-pager 2>&1 | tail -15
             fi
-            echo "(key auth failed, trying password auth)"
-            sshpass -p "$PVE_PASS" ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
-              -o PreferredAuthentications=password -o PubkeyAuthentication=no \
-              "$PVE_USER@$PVE_HOST" 'bash -s' < /tmp/remote-diag.sh
-          }
+          done
+          echo "--- /usr/local/bin"; ls -la /usr/local/bin/ 2>&1 | head -20
+          CTDIAG
 
-          run_remote 2>&1 | tee /tmp/diag.txt
-          echo "exit: $?"
+          for spec in "201 consul-server" "202 nomad-server" "203 traefik" "211 dokploy" "220 authentik"; do
+            id=${spec%% *}; nm=${spec#* }
+            ip="192.168.0.$id"
+            echo
+            echo "############################################################"
+            echo "##### CT $id ($nm) @ $ip"
+            echo "############################################################"
+            ping -c 2 -W 3 "$ip" 2>&1 | tail -2 || true
+            timeout 180 ssh -i /tmp/id_pve -o StrictHostKeyChecking=no -o ConnectTimeout=8 \
+              -o BatchMode=yes "root@$ip" 'bash -s' < /tmp/ct-diag.sh 2>&1 || echo "!!! SSH to $ip failed (rc=$?)"
+          done 2>&1 | tee /tmp/diag.txt
 
-      - name: Direct probes from runner
+      - name: Service endpoint probes
+        if: always()
         run: |
           set -x
-          for ip in 192.168.0.201 192.168.0.202 192.168.0.203 192.168.0.211 192.168.0.220; do
-            ping -c 2 -W 3 "$ip" || true
-          done
-          nc -zv -w 5 192.168.0.201 8500 || true
-          nc -zv -w 5 192.168.0.202 4646 || true
-          nc -zv -w 5 192.168.0.203 80 || true
-          curl -sS --max-time 10 http://192.168.0.202:4646/v1/status/leader || echo "nomad unreachable"
           curl -sS --max-time 10 http://192.168.0.201:8500/v1/status/leader || echo "consul unreachable"
+          echo
+          curl -sS --max-time 10 http://192.168.0.202:4646/v1/status/leader || echo "nomad unreachable"
+          echo
+          curl -sS --max-time 10 -o /dev/null -w 'traefik HTTP %{http_code}\n' http://192.168.0.203:80/ || echo "traefik unreachable"
 
       - name: Upload diagnostics
         if: always()

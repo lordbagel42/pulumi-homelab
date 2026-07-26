@@ -112,6 +112,13 @@ const debianCloudImage = new proxmox.download.File(
         nodeName: "optiplex",
         url: "https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-genericcloud-amd64.qcow2",
         fileName: "debian-12-genericcloud-amd64.qcow2",
+        // The image already sits in /var/lib/vz/import from before it was
+        // managed here — adopt it instead of failing on "refusing to override".
+        overwriteUnmanaged: true,
+        // "latest" is a moving target: without this every run notices the
+        // upstream size changed and re-downloads, which also means every run
+        // depends on cloud.debian.org being reachable from the Proxmox host.
+        overwrite: false,
     },
     { provider },
 );
