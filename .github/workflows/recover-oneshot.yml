@@ -58,7 +58,15 @@ jobs:
 
       # Reconcile state with reality: marks 201/202/203 as gone so `up` recreates
       # them. Does not change any live resource.
+      #
+      # Expected to exit non-zero right now: refreshing the nomad:index:Job
+      # resources queries 192.168.0.202:4646, which is "no route to host" while
+      # the nomad-server container is missing. The container/command resources
+      # still refresh correctly (first attempt reported "- 16 deleted,
+      # 61 unchanged, 8 errored"), and those 8 are exactly the nomad jobs that
+      # `up` is about to recreate anyway — so don't let it block the up.
       - name: Pulumi refresh
+        continue-on-error: true
         uses: pulumi/actions@v6
         with:
           command: refresh
