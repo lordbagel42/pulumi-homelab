@@ -33,30 +33,38 @@ for i in $(seq 1 40); do
   sleep 5
 done
 
-# Detect the data disk: the largest unpartitioned block device that is not the boot disk
-BOOT_DEV=$(lsblk -no PKNAME "$(findmnt -n -o SOURCE /)" 2>/dev/null | head -1)
-DATA_DISK=""
-for dev in /dev/sd?; do
-  name=$(basename "$dev")
-  [ "$name" = "$BOOT_DEV" ] && continue
-  parts=$(lsblk -n -o TYPE "$dev" 2>/dev/null | grep -c "^part" || true)
-  if [ "$parts" -eq 0 ]; then
-    DATA_DISK="$dev"
-    break
-  fi
-done
-
-if [ -z "$DATA_DISK" ]; then
-  echo "ERROR: no unpartitioned data disk found" >&2
-  lsblk >&2
-  return 1
-fi
-echo "Data disk: $DATA_DISK"
-
-# Partition, format, and mount the HDD (idempotent)
+# Partition, format, and mount the HDD.
+#
+# The mount check has to come FIRST. Disk detection looks for a device with no
+# partitions, so once this script has run once the data disk has sda1 on it and
+# detection finds nothing — the script then failed with "no unpartitioned data
+# disk found" on every subsequent run even though the datastore was mounted and
+# perfectly healthy. That aborted the whole Pulumi update.
 if mountpoint -q /mnt/pbs-storage 2>/dev/null; then
-  echo "Data disk already mounted, skipping format"
+  echo "Data disk already mounted at /mnt/pbs-storage, skipping partition/format"
 else
+  # Detect the data disk: an unpartitioned block device that is not the boot disk
+  BOOT_DEV=$(lsblk -no PKNAME "$(findmnt -n -o SOURCE /)" 2>/dev/null | head -1)
+  DATA_DISK=""
+  for dev in /dev/sd?; do
+    name=$(basename "$dev")
+    [ "$name" = "$BOOT_DEV" ] && continue
+    parts=$(lsblk -n -o TYPE "$dev" 2>/dev/null | grep -c "^part" || true)
+    if [ "$parts" -eq 0 ]; then
+      DATA_DISK="$dev"
+      break
+    fi
+  done
+
+  if [ -z "$DATA_DISK" ]; then
+    echo "ERROR: /mnt/pbs-storage is not mounted and no unpartitioned data disk was found" >&2
+    lsblk >&2
+    # This runs piped into `bash -s`, so it is neither a function nor sourced —
+    # `return` here just printed an error and masked the real exit code.
+    exit 1
+  fi
+  echo "Data disk: $DATA_DISK"
+
   umount "${DATA_DISK}1" 2>/dev/null || true
   wipefs -a "$DATA_DISK"
   parted -s "$DATA_DISK" mklabel gpt

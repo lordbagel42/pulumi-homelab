@@ -20,6 +20,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      # Needed by `pulumi config get`, which must run inside the project dir.
+      - uses: actions/checkout@v4
+
       - name: Install Netbird
         run: curl -fsSL https://pkgs.netbird.io/install.sh | sudo bash
 
