@@ -1,0 +1,107 @@
+name: Homelab status (read-only)
+
+# Read-only inventory check. Deploy run 30201055548 replaced the hashistack
+# containers and then failed deleting the old ones with
+# "Configuration file 'nodes/optiplex/lxc/20X.conf' does not exist", so we need
+# to know exactly which containers currently exist and are running.
+
+on:
+  push:
+    branches:
+      - claude/failed-deployment-recovery-fa5moq
+  workflow_dispatch:
+
+concurrency:
+  group: homelab-status
+  cancel-in-progress: true
+
+jobs:
+  status:
+    name: Status
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Netbird
+        run: curl -fsSL https://pkgs.netbird.io/install.sh | sudo bash
+
+      - name: Connect Netbird
+        env:
+          NB_SETUP_KEY: ${{ secrets.NB_SETUP_KEY }}
+        run: sudo netbird up --setup-key "$NB_SETUP_KEY"
+
+      - name: Wait for Netbird peer connection
+        run: |
+          for i in $(seq 1 30); do
+            if sudo netbird status | grep -q "Connected"; then echo connected; exit 0; fi
+            sleep 2
+          done
+          echo "::error::Netbird failed to connect"; exit 1
+
+      - name: Install Pulumi CLI
+        uses: pulumi/actions@v6
+
+      - name: Proxmox inventory
+        if: always()
+        timeout-minutes: 5
+        env:
+          PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
+        run: |
+          set -uo pipefail
+          get() { pulumi config get "$1" --stack homelab 2>/dev/null || true; }
+          ENDPOINT="$(get PROXMOX_NETBIRD_ENDPOINT)"
+          PVE_USER="$(get PROXMOX_USERNAME)"
+          PVE_PASS="$(get PROXMOX_PASSWORD)"
+          HOST="$(printf '%s' "$ENDPOINT" | sed -E 's#^https?://##; s#/.*$##')"
+          echo "::add-mask::$HOST"; echo "::add-mask::${HOST%%:*}"
+          [ -n "$PVE_PASS" ] && echo "::add-mask::$PVE_PASS"
+          [ -n "$PVE_USER" ] && echo "::add-mask::$PVE_USER"
+          API="https://${HOST%%:*}:8006"
+
+          T=$(curl -sk --max-time 20 -d "username=$PVE_USER" --data-urlencode "password=$PVE_PASS" \
+                "$API/api2/json/access/ticket" | jq -r '.data.ticket // empty')
+          if [ -z "$T" ]; then echo "::error::Proxmox API login failed"; exit 1; fi
+          echo "::add-mask::$T"
+          api() { curl -sk --max-time 25 -H "Cookie: PVEAuthCookie=$T" "$API/api2/json$1"; }
+
+          echo "===== cluster resources (all guests) ====="
+          api "/cluster/resources?type=vm" \
+            | jq -r '.data[] | "\(.type) \(.vmid)\t\(.name // "-")\tnode=\(.node)\tstatus=\(.status)"' | sort -V
+
+          for node in $(api /nodes | jq -r '.data[].node'); do
+            echo
+            echo "===== $node: recent failed tasks ====="
+            api "/nodes/$node/tasks?limit=12&errors=1" \
+              | jq -r '.data[]? | "\(.starttime)\t\(.type)\t\(.id)\t\(.status)"' || true
+          done
+
+          echo
+          echo "===== nameserver on surviving containers ====="
+          for id in 201 202 203 204 211 220; do
+            node=$(api "/cluster/resources?type=vm" | jq -r ".data[] | select(.vmid==$id) | .node" | head -1)
+            if [ -z "$node" ]; then echo "CT $id: DOES NOT EXIST"; continue; fi
+            ns=$(api "/nodes/$node/lxc/$id/config" | jq -r '.data.nameserver // "(unset)"')
+            st=$(api "/nodes/$node/lxc/$id/status/current" | jq -r '.data.status // "?"')
+            echo "CT $id on $node: status=$st nameserver='$ns'"
+          done
+
+      - name: Service endpoints
+        if: always()
+        timeout-minutes: 3
+        run: |
+          set -uo pipefail
+          for spec in "consul 192.168.0.201:8500/v1/status/leader" \
+                      "nomad 192.168.0.202:4646/v1/status/leader" \
+                      "traefik 192.168.0.203:8080/api/overview" \
+                      "dokploy 192.168.0.211:3000/" \
+                      "authentik 192.168.0.220:9000/-/health/live/"; do
+            name=${spec%% *}; url=${spec#* }
+            printf '%-10s ' "$name"
+            curl -sS --max-time 8 -o /tmp/b -w '%{http_code}' "http://$url" 2>/dev/null \
+              && printf ' %s\n' "$(head -c 90 /tmp/b)" || printf ' UNREACHABLE\n'
+          done
+
+      - name: Disconnect Netbird
+        if: always()
+        run: sudo netbird down
