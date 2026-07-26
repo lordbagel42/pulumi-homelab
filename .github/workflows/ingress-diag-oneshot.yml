@@ -1,0 +1,108 @@
+name: Ingress attribution diagnostic (one-shot)
+
+# The homelab tunnel connector (CT 204) is now up: the public hostnames moved
+# off Cloudflare 530 and answer 404 instead. A bare Go http.NotFound 404 could
+# come from either side, so attribute it before changing anything:
+#
+#   * ask traefik on .203 directly, with a Host header per hostname — if traefik
+#     404s too, the consul catalog is missing the router registrations (they are
+#     IaC-defined via reverseProxy, and destroying CT 201 wiped the catalog)
+#   * if traefik answers correctly, the 404 is cloudflared's, meaning the tunnel
+#     ingress rules Cloudflare-side do not cover these hostnames
+#
+# Read-only. No pulumi up. Delete once the cause is known.
+
+on:
+  push:
+    branches:
+      - claude/failed-deployment-recovery-fa5moq
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-infra
+
+jobs:
+  diag:
+    name: Attribute the 404 to traefik or cloudflared
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.22.2"
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Install Netbird
+        run: curl -fsSL https://pkgs.netbird.io/install.sh | sudo bash
+
+      - name: Connect Netbird
+        env:
+          NB_SETUP_KEY: ${{ secrets.NB_SETUP_KEY }}
+        run: sudo netbird up --setup-key "$NB_SETUP_KEY"
+
+      - name: Wait for Netbird peer connection
+        run: |
+          for i in $(seq 1 30); do
+            if sudo netbird status | grep -q "Connected"; then echo connected; exit 0; fi
+            sleep 2
+          done
+          echo "::error::Netbird failed to connect"; exit 1
+
+      - name: Consul catalog
+        run: |
+          set -uo pipefail
+          echo "===== consul services ====="
+          curl -sS --max-time 15 http://192.168.0.201:8500/v1/catalog/services | jq . || true
+          echo
+          echo "===== consul nodes ====="
+          curl -sS --max-time 15 http://192.168.0.201:8500/v1/catalog/nodes \
+            | jq -r '.[]? | "\(.Node)\t\(.Address)"' || true
+
+      - name: Traefik routers and services
+        run: |
+          set -uo pipefail
+          echo "===== routers ====="
+          curl -sS --max-time 15 http://192.168.0.203:8080/api/http/routers \
+            | jq -r '.[]? | "\(.name)\tstatus=\(.status)\trule=\(.rule)\tsvc=\(.service)"' || true
+          echo
+          echo "===== services ====="
+          curl -sS --max-time 15 http://192.168.0.203:8080/api/http/services \
+            | jq -r '.[]? | "\(.name)\tstatus=\(.status)\tservers=\((.loadBalancer.servers // [])|length)"' || true
+          echo
+          echo "===== middlewares ====="
+          curl -sS --max-time 15 http://192.168.0.203:8080/api/http/middlewares \
+            | jq -r '.[]? | "\(.name)\tstatus=\(.status)"' || true
+
+      # The decisive test: bypass Cloudflare entirely and ask traefik what it
+      # would answer for each public hostname.
+      - name: Ask traefik directly per hostname
+        run: |
+          set -uo pipefail
+          for h in auth.bagelindustries.com consul.bagelindustries.com \
+                   nomad.bagelindustries.com demo.bagelindustries.com \
+                   dokploy.raygen.dev hellonomad.raygen.dev lookout.raygen.dev; do
+            code=$(curl -sS -o /dev/null -m 12 -w '%{http_code}' \
+                     -H "Host: $h" "http://192.168.0.203/" 2>/dev/null || echo 000)
+            printf 'traefik  %-34s HTTP %s\n' "$h" "$code"
+          done
+
+      - name: Cloudflared connector log on CT 204
+        env:
+          PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
+        run: |
+          set -uo pipefail
+          pulumi config get SSH_PRIVATE_KEY --stack homelab > /tmp/id_pve 2>/dev/null || true
+          chmod 600 /tmp/id_pve
+          if [ ! -s /tmp/id_pve ]; then echo "(no ssh key available)"; exit 0; fi
+          timeout -k 5 60 ssh -i /tmp/id_pve -o StrictHostKeyChecking=no \
+            -o ConnectTimeout=8 -o BatchMode=yes root@192.168.0.204 \
+            'journalctl -u cloudflared --no-pager -n 80 | sed -E "s/[A-Za-z0-9_-]{40,}/<redacted>/g"' \
+            2>&1 || echo "(ssh to 192.168.0.204 failed)"
+
+      - name: Disconnect Netbird
+        if: always()
+        run: sudo netbird down
