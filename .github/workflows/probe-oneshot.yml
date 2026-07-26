@@ -1,0 +1,66 @@
+name: Probe Homelab (read-only)
+
+# Temporary read-only probe. Used to tell how far the in-flight pulumi up has
+# actually progressed (in particular whether nomad finally listens on 4646)
+# without touching the Pulumi stack. Delete once the deploy is settled.
+
+on:
+  push:
+    branches:
+      - claude/failed-deployment-recovery-fa5moq
+  workflow_dispatch:
+
+concurrency:
+  group: homelab-probe
+  cancel-in-progress: true
+
+jobs:
+  probe:
+    name: Probe
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Install Netbird
+        run: curl -fsSL https://pkgs.netbird.io/install.sh | sudo bash
+
+      - name: Connect Netbird
+        env:
+          NB_SETUP_KEY: ${{ secrets.NB_SETUP_KEY }}
+        run: sudo netbird up --setup-key "$NB_SETUP_KEY"
+
+      - name: Wait for Netbird peer connection
+        run: |
+          for i in $(seq 1 30); do
+            if sudo netbird status | grep -q "Connected"; then echo connected; exit 0; fi
+            sleep 2
+          done
+          echo "::error::Netbird failed to connect"; exit 1
+
+      - name: Probe service endpoints
+        if: always()
+        timeout-minutes: 3
+        run: |
+          set -uo pipefail
+          probe() {
+            printf '%-34s ' "$1"
+            curl -sS --max-time 8 -o /tmp/body -w '%{http_code}' "$2" 2>/dev/null \
+              && printf ' body=%s\n' "$(head -c 120 /tmp/body)" \
+              || printf 'UNREACHABLE\n'
+          }
+          probe "consul   201:8500 leader"  http://192.168.0.201:8500/v1/status/leader
+          probe "nomad    202:4646 leader"  http://192.168.0.202:4646/v1/status/leader
+          probe "nomad    202:4646 members" http://192.168.0.202:4646/v1/agent/members
+          probe "traefik  203:80"           http://192.168.0.203:80/
+          probe "traefik  203:8080 rawdata" http://192.168.0.203:8080/api/rawdata
+          probe "dokploy  211:3000"         http://192.168.0.211:3000/
+          probe "authentik 220:9000"        http://192.168.0.220:9000/-/health/live/
+          echo
+          echo "--- consul catalog services ---"
+          curl -sS --max-time 8 http://192.168.0.201:8500/v1/catalog/services || echo unreachable
+          echo
+          echo "--- nomad jobs ---"
+          curl -sS --max-time 8 http://192.168.0.202:4646/v1/jobs || echo unreachable
+
+      - name: Disconnect Netbird
+        if: always()
+        run: sudo netbird down
