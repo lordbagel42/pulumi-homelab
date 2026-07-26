@@ -61,6 +61,38 @@ jobs:
           echo "--- nomad jobs ---"
           curl -sS --max-time 8 http://192.168.0.202:4646/v1/jobs || echo unreachable
 
+      - name: Install Pulumi CLI
+        if: always()
+        uses: pulumi/actions@v6
+
+      - name: Check import volumes still present on each node
+        if: always()
+        timeout-minutes: 4
+        env:
+          PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
+        run: |
+          set -uo pipefail
+          get() { pulumi config get "$1" --stack homelab 2>/dev/null || true; }
+          ENDPOINT="$(get PROXMOX_NETBIRD_ENDPOINT)"
+          PVE_USER="$(get PROXMOX_USERNAME)"
+          PVE_PASS="$(get PROXMOX_PASSWORD)"
+          HOST="$(printf '%s' "$ENDPOINT" | sed -E 's#^https?://##; s#/.*$##')"
+          echo "::add-mask::$HOST"; echo "::add-mask::${HOST%%:*}"
+          echo "::add-mask::$PVE_PASS"; [ -n "$PVE_USER" ] && echo "::add-mask::$PVE_USER"
+          API="https://${HOST%%:*}:8006"
+
+          T=$(curl -sk --max-time 20 -d "username=$PVE_USER" --data-urlencode "password=$PVE_PASS" \
+                "$API/api2/json/access/ticket" | jq -r '.data.ticket // empty')
+          if [ -z "$T" ]; then echo "::warning::API login failed"; exit 0; fi
+          echo "::add-mask::$T"
+          api() { curl -sk --max-time 25 -H "Cookie: PVEAuthCookie=$T" "$API/api2/json$1"; }
+
+          for node in $(api /nodes | jq -r '.data[].node'); do
+            echo "===== $node import volumes ====="
+            api "/nodes/$node/storage/local/content?content=import" \
+              | jq -r '.data[]? | "\(.volid)\tsize=\(.size)"' || echo "(none)"
+          done
+
       - name: Disconnect Netbird
         if: always()
         run: sudo netbird down
