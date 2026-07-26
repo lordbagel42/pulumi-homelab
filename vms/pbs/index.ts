@@ -23,7 +23,12 @@ export function register(ctx: ServiceContext): void {
         nodeName: "inspiron",
         url: "https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-genericcloud-amd64.qcow2",
         fileName: "debian-12-genericcloud-amd64.qcow2",
-        overwriteUnmanaged: true,
+        // inspiron cannot currently reach cloud.debian.org (the metadata probe
+        // times out with HTTP 596), and "latest" keeps changing size, so the
+        // default overwrite=true tried to re-download on every deploy. The
+        // image is already present and in state — stop checking its size.
+        // Deliberately NOT overwriteUnmanaged: that deletes before downloading,
+        // which on this node would leave no image at all.
         overwrite: false,
     }, { provider: ctx.provider });
 

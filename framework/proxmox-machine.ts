@@ -14,6 +14,8 @@ export interface ProxmoxMachineArgs {
     importFrom?: pulumi.Input<string>;
     ip: string;
     gateway?: string;
+    /** Resolvers written into the guest. Defaults to DEFAULT_DNS_SERVERS. */
+    dnsServers?: string[];
     tags?: string[];
     nesting?: boolean;
     privileged?: boolean;
@@ -32,6 +34,18 @@ export interface ProxmoxMachineArgs {
     };
     consulProvider?: consul.Provider;
 }
+
+/**
+ * Containers must be told their resolvers explicitly.
+ *
+ * When a container config carries no `nameserver`, PVE copies the *host's*
+ * /etc/resolv.conf into the guest. The Proxmox nodes run NetBird, which points
+ * that file at its own loopback resolvers (127.0.2.2/127.0.2.3) — addresses
+ * that resolve to nothing inside a container's own network namespace. The guest
+ * then has working routing but no DNS at all, which is what broke every
+ * `apt-get update` in the hashistack/dokploy/authentik playbooks.
+ */
+export const DEFAULT_DNS_SERVERS = ["1.1.1.1", "8.8.8.8"];
 
 export class ProxmoxMachine extends pulumi.ComponentResource {
     public readonly ip: string;
@@ -58,6 +72,7 @@ export class ProxmoxMachine extends pulumi.ComponentResource {
                 initialization: {
                     hostname: name,
                     ipConfigs: [{ ipv4: { address: `${args.ip}/24`, gateway } }],
+                    dns: { servers: args.dnsServers ?? DEFAULT_DNS_SERVERS },
                     userAccount: {
                         password: args.password,
                         keys: args.sshKeys,

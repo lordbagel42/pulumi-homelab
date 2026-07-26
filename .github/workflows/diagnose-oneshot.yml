@@ -1,8 +1,20 @@
 name: Diagnose Homelab (one-shot)
 
-# Temporary diagnostic workflow. Runs on push to the recovery branch so we can
-# read live homelab state (Proxmox host + LXC network/apt/service health) from a
-# runner that has Netbird access. Delete once the deploy is healthy again.
+# Temporary repair + diagnostic workflow. Runs on push to the recovery branch.
+#
+# Findings so far:
+#   * every LXC has /etc/resolv.conf = 127.0.2.2/127.0.2.3 (the Proxmox host's
+#     NetBird loopback resolvers, copied in by PVE because the container config
+#     carries no `nameserver`). Routing works, DNS does not, so `apt-get update`
+#     fails and the hashistack/dokploy/authentik playbooks die on task 1.
+#   * nomad.service on CT 202 is failed (exit 1 after 306ms) and the container
+#     has no persistent journal, so the real reason is still unknown.
+#
+# This run sets `nameserver` on the container configs (in-place, no rebuild),
+# repairs resolv.conf on the running guests so the fix applies immediately, and
+# then captures nomad's actual startup output.
+#
+# Delete once the deploy is healthy again.
 
 on:
   push:
@@ -10,9 +22,12 @@ on:
       - claude/failed-deployment-recovery-fa5moq
   workflow_dispatch:
 
+env:
+  DNS_SERVERS: 1.1.1.1 8.8.8.8
+
 jobs:
-  diagnose:
-    name: Diagnose
+  repair:
+    name: Repair DNS and diagnose nomad
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -66,18 +81,13 @@ jobs:
           echo "::add-mask::$PVE_PASS"
           [ -n "$PVE_USER" ] && echo "::add-mask::$PVE_USER"
 
-          echo "ssh key bytes: $(wc -c < /tmp/id_pve)"
-          echo "ssh key type: $(head -1 /tmp/id_pve | tr -dc 'A-Za-z -')"
-          echo "endpoint host resolved (masked); pve api user local part: ${PVE_USER%%@*}"
-
           {
             echo "api=https://${HOST%%:*}:8006"
-            echo "host=${HOST%%:*}"
             echo "pve_user=$PVE_USER"
           } >> "$GITHUB_OUTPUT"
           echo "PVE_PASS=$PVE_PASS" >> "$GITHUB_ENV"
 
-      - name: Proxmox API — nodes, containers, VMs, storage
+      - name: Show node DNS config, then set nameserver on each container
         if: always()
         env:
           PVE_API: ${{ steps.cfg.outputs.api }}
@@ -87,78 +97,79 @@ jobs:
           TICKET_JSON=$(curl -sk --max-time 20 -d "username=$PVE_USER" --data-urlencode "password=$PVE_PASS" \
             "$PVE_API/api2/json/access/ticket")
           TICKET=$(printf '%s' "$TICKET_JSON" | jq -r '.data.ticket // empty')
+          CSRF=$(printf '%s' "$TICKET_JSON" | jq -r '.data.CSRFPreventionToken // empty')
           if [ -z "$TICKET" ]; then
-            echo "::warning::Proxmox API login failed: $(printf '%s' "$TICKET_JSON" | head -c 300)"
-            exit 0
+            echo "::error::Proxmox API login failed"
+            exit 1
           fi
           echo "::add-mask::$TICKET"
-          api() { curl -sk --max-time 25 -H "Cookie: PVEAuthCookie=$TICKET" "$PVE_API/api2/json$1"; }
+          echo "::add-mask::$CSRF"
+          api()  { curl -sk --max-time 25 -H "Cookie: PVEAuthCookie=$TICKET" "$PVE_API/api2/json$1"; }
+          apiw() { curl -sk --max-time 40 -X PUT -H "Cookie: PVEAuthCookie=$TICKET" \
+                     -H "CSRFPreventionToken: $CSRF" "$PVE_API/api2/json$1" "${@:2}"; }
 
-          echo "===== nodes ====="
-          api /nodes | jq -r '.data[] | "\(.node)\tstatus=\(.status)\tuptime=\(.uptime)\tmem=\(.mem)/\(.maxmem)"'
-
+          echo "===== per-node DNS (this is what containers inherit) ====="
           for node in $(api /nodes | jq -r '.data[].node'); do
-            echo
-            echo "===== $node: containers ====="
-            api "/nodes/$node/lxc" | jq -r '.data[] | "CT \(.vmid)\t\(.name)\tstatus=\(.status)\tuptime=\(.uptime // 0)"' | sort -V
-            echo "===== $node: vms ====="
-            api "/nodes/$node/qemu" | jq -r '.data[] | "VM \(.vmid)\t\(.name)\tstatus=\(.status)"' | sort -V
-            echo "===== $node: storage ====="
-            api "/nodes/$node/storage" | jq -r '.data[] | "\(.storage)\ttype=\(.type)\tactive=\(.active)\tavail=\(.avail // 0)"'
-            echo "===== $node: import volumes ====="
-            api "/nodes/$node/storage/local/content?content=import" | jq -r '.data[]? | "\(.volid)\tsize=\(.size)"' || true
-            echo "===== $node: recent failed tasks ====="
-            api "/nodes/$node/tasks?limit=25&errors=1" | jq -r '.data[]? | "\(.starttime)\t\(.type)\t\(.id)\t\(.status)"' || true
+            echo -n "$node: "
+            api "/nodes/$node/dns" | jq -c '.data'
           done
 
+          echo
+          echo "===== setting nameserver on containers ====="
           for id in 201 202 203 204 211 220; do
-            node=$(api /cluster/resources?type=vm | jq -r ".data[] | select(.vmid==$id) | .node" | head -1)
-            [ -z "$node" ] && continue
-            echo
-            echo "===== CT $id config (on $node) ====="
-            api "/nodes/$node/lxc/$id/config" | jq -r '.data | to_entries[] | select(.key|test("password|ssh-public-keys")|not) | "\(.key) = \(.value)"' | sort
+            node=$(api "/cluster/resources?type=vm" | jq -r ".data[] | select(.vmid==$id) | .node" | head -1)
+            if [ -z "$node" ]; then echo "CT $id: not found, skipping"; continue; fi
+            before=$(api "/nodes/$node/lxc/$id/config" | jq -r '.data.nameserver // "(unset)"')
+            resp=$(apiw "/nodes/$node/lxc/$id/config" --data-urlencode "nameserver=$DNS_SERVERS")
+            after=$(api "/nodes/$node/lxc/$id/config" | jq -r '.data.nameserver // "(unset)"')
+            echo "CT $id on $node: '$before' -> '$after'  ${resp:+api=$resp}"
           done
 
-      - name: LXC diagnostics over direct SSH
+      - name: Repair resolv.conf on running guests
         if: always()
         run: |
           set -uo pipefail
-
-          cat > /tmp/ct-diag.sh <<'CTDIAG'
-          echo "--- os"; cat /etc/os-release | head -3
-          echo "--- resolv.conf"; cat /etc/resolv.conf
-          echo "--- ip/route"; ip -4 addr show scope global; ip route
-          echo "--- ping gateway"; ping -c 2 -W 3 192.168.0.1 2>&1 | tail -3
-          echo "--- ping 1.1.1.1"; ping -c 2 -W 3 1.1.1.1 2>&1 | tail -3
-          echo "--- dns via resolv.conf"; getent hosts deb.debian.org 2>&1 || echo "GETENT FAILED"
-          echo "--- dns via 1.1.1.1 directly"; (command -v dig >/dev/null && dig +short +time=3 @1.1.1.1 deb.debian.org) 2>&1 || echo "(no dig)"
-          echo "--- https to deb.debian.org"; curl -sS -o /dev/null -w 'HTTP %{http_code} in %{time_total}s\n' --max-time 15 https://deb.debian.org/debian/dists/trixie/Release 2>&1 || echo "CURL FAILED"
-          echo "--- apt sources"; cat /etc/apt/sources.list 2>/dev/null; cat /etc/apt/sources.list.d/* 2>/dev/null
-          echo "--- date"; date -u
-          echo "--- apt-get update"; apt-get update 2>&1 | tail -30
-          echo "--- disk"; df -h / | tail -2
-          echo "--- services"; systemctl is-active consul nomad traefik docker 2>&1
-          echo "--- failed units"; systemctl --failed --no-legend 2>&1 | head -10
-          echo "--- consul/nomad/traefik unit logs"; for u in consul nomad traefik; do
-            if systemctl list-unit-files "$u.service" >/dev/null 2>&1 && systemctl cat "$u.service" >/dev/null 2>&1; then
-              echo "  == $u =="; systemctl status "$u" --no-pager 2>&1 | head -12
-              journalctl -u "$u" -n 15 --no-pager 2>&1 | tail -15
-            fi
-          done
-          echo "--- /usr/local/bin"; ls -la /usr/local/bin/ 2>&1 | head -20
-          CTDIAG
-
-          for spec in "201 consul-server" "202 nomad-server" "203 traefik" "211 dokploy" "220 authentik"; do
-            id=${spec%% *}; nm=${spec#* }
+          for id in 201 202 203 211 220; do
             ip="192.168.0.$id"
-            echo
-            echo "############################################################"
-            echo "##### CT $id ($nm) @ $ip"
-            echo "############################################################"
-            ping -c 2 -W 3 "$ip" 2>&1 | tail -2 || true
-            timeout 180 ssh -i /tmp/id_pve -o StrictHostKeyChecking=no -o ConnectTimeout=8 \
-              -o BatchMode=yes "root@$ip" 'bash -s' < /tmp/ct-diag.sh 2>&1 || echo "!!! SSH to $ip failed (rc=$?)"
-          done 2>&1 | tee /tmp/diag.txt
+            echo "===== CT $id @ $ip ====="
+            timeout 60 ssh -i /tmp/id_pve -o StrictHostKeyChecking=no -o ConnectTimeout=8 \
+              -o BatchMode=yes "root@$ip" "bash -s" <<EOSH || echo "!!! ssh to $ip failed"
+          set -u
+          printf '# --- BEGIN PVE ---\nsearch local\n' > /etc/resolv.conf
+          for s in $DNS_SERVERS; do echo "nameserver \$s" >> /etc/resolv.conf; done
+          printf '# --- END PVE ---\n' >> /etc/resolv.conf
+          cat /etc/resolv.conf
+          getent hosts deb.debian.org && echo "DNS OK" || echo "DNS STILL BROKEN"
+          apt-get update 2>&1 | tail -6
+          EOSH
+          done
+
+      - name: Diagnose nomad on CT 202
+        if: always()
+        run: |
+          set -uo pipefail
+          timeout 150 ssh -i /tmp/id_pve -o StrictHostKeyChecking=no -o ConnectTimeout=8 \
+            -o BatchMode=yes root@192.168.0.202 'bash -s' <<'EOSH' || echo "!!! ssh failed"
+          set -u
+          echo "===== /etc/nomad.d ====="
+          ls -la /etc/nomad.d/; echo; cat /etc/nomad.d/*.hcl
+          echo "===== unit file ====="
+          cat /etc/systemd/system/nomad.service
+          echo "===== data_dir ====="
+          ls -la /var/lib/ | grep -i nomad || echo "/var/lib/nomad MISSING"
+          echo "===== nomad version ====="
+          /usr/local/bin/nomad version
+          echo "===== foreground start attempt (10s) ====="
+          timeout 10 /usr/local/bin/nomad agent -config-dir=/etc/nomad.d/ 2>&1 | head -40
+          echo "(exit: $?)"
+          echo "===== systemctl restart + status ====="
+          systemctl reset-failed nomad 2>/dev/null || true
+          systemctl restart nomad 2>&1 || true
+          sleep 5
+          systemctl status nomad --no-pager 2>&1 | head -20
+          echo "===== listening ports ====="
+          (ss -tlnp 2>/dev/null || netstat -tlnp 2>/dev/null) | head -20
+          EOSH
 
       - name: Service endpoint probes
         if: always()
@@ -167,16 +178,6 @@ jobs:
           curl -sS --max-time 10 http://192.168.0.201:8500/v1/status/leader || echo "consul unreachable"
           echo
           curl -sS --max-time 10 http://192.168.0.202:4646/v1/status/leader || echo "nomad unreachable"
-          echo
-          curl -sS --max-time 10 -o /dev/null -w 'traefik HTTP %{http_code}\n' http://192.168.0.203:80/ || echo "traefik unreachable"
-
-      - name: Upload diagnostics
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: homelab-diagnostics
-          path: /tmp/diag.txt
-          if-no-files-found: warn
 
       - name: Disconnect Netbird
         if: always()

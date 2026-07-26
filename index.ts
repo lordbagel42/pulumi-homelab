@@ -6,6 +6,7 @@ import * as proxmox from "@muhlba91/pulumi-proxmoxve";
 import { allVms as vms, allLxcs as lxcs } from "./architecture";
 import { InfisicalConfig, readSecret } from "./infisical";
 import { discoverAndRegisterAll, ServiceContext } from "./framework";
+import { DEFAULT_DNS_SERVERS } from "./framework/proxmox-machine";
 import type { GrafanaConfig } from "./utils/alloy";
 
 const config = new pulumi.Config();
@@ -112,12 +113,15 @@ const debianCloudImage = new proxmox.download.File(
         nodeName: "optiplex",
         url: "https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-genericcloud-amd64.qcow2",
         fileName: "debian-12-genericcloud-amd64.qcow2",
-        // The image already sits in /var/lib/vz/import from before it was
-        // managed here — adopt it instead of failing on "refusing to override".
+        // The image already sits in /var/lib/vz/import but is not in state, so
+        // every deploy died on "refusing to override existing file". optiplex
+        // can reach cloud.debian.org (its download task started before hitting
+        // that check), so letting the provider replace the stale copy once is
+        // safe here.
         overwriteUnmanaged: true,
-        // "latest" is a moving target: without this every run notices the
-        // upstream size changed and re-downloads, which also means every run
-        // depends on cloud.debian.org being reachable from the Proxmox host.
+        // After that, stop re-checking: "latest" is a moving target, and with
+        // overwrite=true every deploy would notice the upstream size changed
+        // and depend on the host reaching cloud.debian.org all over again.
         overwrite: false,
     },
     { provider },
@@ -185,6 +189,9 @@ for (const lxc of lxcs) {
                         ? { ipv4: { address: "dhcp" } }
                         : { ipv4: { address: lxc.ipAddress, gateway: lxc.gateway } },
                 ],
+                // See DEFAULT_DNS_SERVERS: without this the guest inherits the
+                // host's NetBird loopback resolvers and has no working DNS.
+                dns: { servers: DEFAULT_DNS_SERVERS },
                 userAccount: { password: vmPassword, keys: [sshKey] },
             },
             tags: [lxc.category, ...(lxc.tags ?? [])],
