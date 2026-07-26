@@ -75,15 +75,24 @@ jobs:
           PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
           HOSTED: "true"
 
-      - name: Pulumi up
-        uses: pulumi/actions@v6
-        with:
-          command: up
-          stack-name: homelab
-          comment-on-summary: true
+      # The plain `up` recreated 201/202/203 in ~51s but left them bare: the
+      # provisioning resources are command.local.Command, and rebuilding a
+      # container does not invalidate them, so Pulumi still considered
+      # consul/nomad/traefik provisioned. Force those three to re-run.
+      #
+      # Everything else still gets a normal up, so the nomad jobs are recreated
+      # once nomad-server is actually serving again.
+      - name: Pulumi up (replacing hashistack provisioners)
         env:
           PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
           HOSTED: "true"
+        run: |
+          set -uo pipefail
+          base='urn:pulumi:homelab::pulumi-homelab::command:local/command:Command'
+          pulumi up --yes --stack homelab --non-interactive \
+            --replace "$base::consul-provision" \
+            --replace "$base::nomad-provision" \
+            --replace "$base::traefik-provision"
 
       - name: Disconnect Netbird
         if: always()
