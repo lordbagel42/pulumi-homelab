@@ -68,6 +68,18 @@ interface YamlServiceConfig {
 }
 
 function registerYamlService(dir: string, cfg: YamlServiceConfig, ctx: ServiceContext): void {
+    // ProxmoxMachine only registers a consul service when it is given BOTH a
+    // reverseProxy and a consulProvider, and no provider is threaded through here.
+    // A service.yaml asking for a route would therefore get a machine and no route,
+    // silently. Say so rather than letting it look configured.
+    if (cfg.reverseProxy) {
+        pulumi.log.warn(
+            `${cfg.name}: service.yaml declares reverseProxy but registerYamlService ` +
+            `passes no consulProvider, so no traefik route will be created. ` +
+            `Define this service in index.ts instead (see lxcs/authentik).`,
+        );
+    }
+
     new ProxmoxMachine(cfg.name, {
         type: cfg.type || "lxc",
         vmId: cfg.vmid,

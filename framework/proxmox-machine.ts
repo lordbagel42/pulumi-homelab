@@ -31,6 +31,8 @@ export interface ProxmoxMachineArgs {
         port: number;
         protected?: boolean;
         entrypoint?: string;
+        /** Extra raw traefik tags, e.g. to define a middleware this service owns. */
+        extraTags?: string[];
     };
     consulProvider?: consul.Provider;
 }
@@ -146,20 +148,58 @@ export class ProxmoxMachine extends pulumi.ComponentResource {
             `traefik.http.routers.${name}.entrypoints=${rp.entrypoint || "web"}`,
             `traefik.http.services.${name}.loadbalancer.server.port=${rp.port}`,
             ...(rp.protected ? [`traefik.http.routers.${name}.middlewares=authentik@consulcatalog`] : []),
+            ...(rp.extraTags ?? []),
         ];
 
-        // Register a node for the machine if it doesn't exist
-        const node = new consul.Node(`${name}-node`, {
-            name: name,
-            address: this.ip,
-        }, { provider, parent: this });
-
-        new consul.Service(`${name}-service`, {
-            name: name,
-            node: node.name,
+        registerExternalConsulService(`${name}`, {
             address: this.ip,
             port: rp.port,
-            tags: tags,
-        }, { provider, parent: this, dependsOn: [node] });
+            tags,
+            provider,
+            parent: this,
+        });
     }
+}
+
+/**
+ * Register a service in the consul catalog so traefik's consulCatalog provider
+ * routes to it.
+ *
+ * The node MUST NOT share a name with a node that runs its own consul agent.
+ * An agent is the sole authority for its own node's service list: anti-entropy
+ * syncs local state to the catalog and *deletes* catalog entries for that node
+ * which the agent does not know about. Registering `authentik` on node
+ * `authentik` — which runs an agent — therefore vanished within seconds, every
+ * time, which is why auth.bagelindustries.com had no traefik router at all while
+ * Pulumi state happily recorded the registration as present.
+ *
+ * Catalog-API registration is for *external* services, so give each one its own
+ * synthetic `-svc` node that no agent owns. Nothing prunes those.
+ */
+export function registerExternalConsulService(name: string, args: {
+    address: pulumi.Input<string>;
+    port: number;
+    tags: string[];
+    provider: consul.Provider;
+    parent?: pulumi.Resource;
+    dependsOn?: pulumi.Input<pulumi.Resource>[];
+}): consul.Service {
+    const opts: pulumi.CustomResourceOptions = {
+        provider: args.provider,
+        ...(args.parent ? { parent: args.parent } : {}),
+        ...(args.dependsOn ? { dependsOn: args.dependsOn } : {}),
+    };
+
+    const node = new consul.Node(`${name}-node`, {
+        name: `${name}-svc`,
+        address: args.address,
+    }, opts);
+
+    return new consul.Service(`${name}-service`, {
+        name: name,
+        node: node.name,
+        address: args.address,
+        port: args.port,
+        tags: args.tags,
+    }, { ...opts, dependsOn: [node, ...(args.dependsOn ?? [])] });
 }

@@ -16,6 +16,11 @@ export function register(ctx: ServiceContext) {
     const VMID = 220;
     const IP = ip(VMID);
 
+    // The registration below talks to consul's HTTP API, so consul has to exist
+    // before it runs — the provider previously had no ordering at all.
+    const consulSetup = [ctx.commands.get("consul-setup")]
+        .filter((r): r is pulumi.Resource => r !== undefined);
+
     const authentik = new ProxmoxMachine(name, {
         type: "lxc",
         vmId: VMID,
@@ -32,11 +37,21 @@ export function register(ctx: ServiceContext) {
             domain: "auth.bagelindustries.com",
             port: 9000,
             entrypoint: "web",
+            // Nothing else defined `authentik@consulcatalog`, yet demo.nomad.hcl
+            // and every `protected: true` machine reference it as a middleware.
+            // Traefik disables a router whose middleware does not exist, which is
+            // why demo.bagelindustries.com had the correct Host rule and still
+            // 404'd. Authentik owns the forwardauth, so it declares it here.
+            extraTags: [
+                `traefik.http.middlewares.authentik.forwardauth.address=http://${IP}:9000/outpost.goauthentik.io/auth/traefik`,
+                "traefik.http.middlewares.authentik.forwardauth.trustForwardHeader=true",
+                "traefik.http.middlewares.authentik.forwardauth.authResponseHeaders=X-authentik-username,X-authentik-groups,X-authentik-email,X-authentik-name,X-authentik-uid,X-authentik-jwt,X-authentik-meta-jwks,X-authentik-meta-outpost,X-authentik-meta-provider,X-authentik-meta-app,X-authentik-meta-version",
+            ],
         },
         consulProvider: new consul.Provider("authentik-consul", {
             address: `${CONSUL_IP_CONST}:8500`,
             scheme: "http",
-        }),
+        }, { dependsOn: consulSetup }),
     }, { provider: ctx.provider });
 
     const provision = ansibleProvision("authentik-provision", {

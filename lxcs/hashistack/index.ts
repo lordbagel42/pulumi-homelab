@@ -1,7 +1,9 @@
+import * as fs from "fs";
 import * as path from "path";
 import * as pulumi from "@pulumi/pulumi";
 import * as consul from "@pulumi/consul";
-import { ProxmoxMachine } from "../../framework/proxmox-machine";
+import * as nomad from "@pulumi/nomad";
+import { ProxmoxMachine, registerExternalConsulService } from "../../framework/proxmox-machine";
 import { ansibleProvision } from "../../utils/ansible";
 import { lxcPassword } from "../../infisical";
 import { ip } from "../../framework";
@@ -111,4 +113,50 @@ export function register(ctx: ServiceContext) {
         generation: 1,
     });
     ctx.commands.set("traefik-setup", traefikProvision);
+
+    // ── Public routes for the consul and nomad UIs ─────────────────────────────
+    // These hostnames are in DNS and behind the tunnel, but nothing in this repo
+    // ever routed them. The only routers traefik had for consul/nomad came from
+    // the agents' own self-registrations, which carry no traefik.* tags, so
+    // traefik fell back to its defaultRule and served them as Host(`consul`) and
+    // Host(`nomad`) — never the FQDNs. Registering the UIs explicitly fixes that
+    // without touching the agents' own entries.
+    registerExternalConsulService("consul-ui", {
+        address: CONSUL_IP_CONST,
+        port: 8500,
+        tags: [
+            "traefik.enable=true",
+            "traefik.http.routers.consul-ui.rule=Host(`consul.bagelindustries.com`)",
+            "traefik.http.routers.consul-ui.entrypoints=web",
+            "traefik.http.services.consul-ui.loadbalancer.server.port=8500",
+        ],
+        provider: consulProvider,
+        dependsOn: [consulProvision],
+    });
+
+    registerExternalConsulService("nomad-ui", {
+        address: NOMAD_IP,
+        port: 4646,
+        tags: [
+            "traefik.enable=true",
+            "traefik.http.routers.nomad-ui.rule=Host(`nomad.bagelindustries.com`)",
+            "traefik.http.routers.nomad-ui.entrypoints=web",
+            "traefik.http.services.nomad-ui.loadbalancer.server.port=4646",
+        ],
+        provider: consulProvider,
+        dependsOn: [nomadProvision],
+    });
+
+    // ── hello-world ───────────────────────────────────────────────────────────
+    // hello-world.nomad.hcl has sat next to this file serving hellonomad.raygen.dev
+    // in its tags while no code ever submitted it. Register it as a tracked job so
+    // refresh notices when it goes missing, the way the oracle jobs and lookout are.
+    const nomadProvider = new nomad.Provider("homelab-nomad", {
+        address: `http://${NOMAD_IP}:4646`,
+    }, { dependsOn: [nomadProvision] });
+
+    const helloJob = new nomad.Job("hello-world", {
+        jobspec: fs.readFileSync(path.join(__dirname, "hello-world.nomad.hcl"), "utf-8"),
+    }, { provider: nomadProvider, dependsOn: [nomadProvision, traefikProvision] });
+    ctx.commands.set("hello-world-deploy", helloJob);
 }
