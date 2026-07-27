@@ -86,6 +86,12 @@ jobs:
         with:
           command: up
           stack-name: homelab
+          # Reconcile state against reality before updating. Consul service
+          # registrations in particular get lost out of band (an agent restart
+          # dropped the authentik service while Pulumi still believed it
+          # existed, so it was never re-registered and its route 404'd). Without
+          # this, that class of drift is invisible and self-perpetuating.
+          refresh: true
           comment-on-summary: true
         env:
           PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}

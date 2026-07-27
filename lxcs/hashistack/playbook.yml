@@ -480,3 +480,29 @@
             msg: |
               An agent did not come up on {{ inventory_hostname }} (role={{ role }}).
               {{ agent_journals.stdout | default('no journal output') }}
+
+    # Bridge-mode allocations run, but their mapped host ports refuse
+    # connections, so Consul marks them critical and Traefik drops the route:
+    #   dial tcp 192.168.0.230:30879: connect: connection refused
+    # "Refused" rather than "timed out" means nothing DNAT'd the packet, i.e.
+    # the CNI portmap rules are absent or not matching. Record the firewall
+    # state so the cause is visible in the deploy log.
+    - name: Record CNI port-forwarding state
+      shell: |
+        echo "--- iptables nat, CNI chains ---"
+        iptables -t nat -S 2>&1 | grep -i cni | head -25 || echo "(no CNI rules in iptables nat)"
+        echo "--- nftables, CNI/portmap ---"
+        nft list ruleset 2>/dev/null | grep -iE 'cni|dnat' | head -15 || echo "(nft unavailable or no matches)"
+        echo "--- docker firewall backend ---"
+        docker info 2>/dev/null | grep -iE 'firewall|iptables' || echo "(not reported)"
+        echo "--- listening ports ---"
+        ss -lntp 2>/dev/null | head -15 || true
+      register: cni_state
+      changed_when: false
+      failed_when: false
+      when: role == 'nomad-client'
+
+    - name: Show CNI port-forwarding state
+      debug:
+        msg: "{{ cni_state.stdout_lines | default([]) }}"
+      when: role == 'nomad-client'
