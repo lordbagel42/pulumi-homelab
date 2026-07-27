@@ -23,6 +23,19 @@ export function ansibleProvision(
 ): command.local.Command {
     const playbookHash = crypto.createHash("sha256").update(fs.readFileSync(args.playbookPath)).digest("hex");
 
+    // extraVars are JSON-encoded before any Output resolves, so an Output does
+    // not serialise to its value — it serialises to Pulumi's "Calling [toJSON]
+    // on an [Output<T>] is not supported" message. That lands in whatever file
+    // the playbook renders and corrupts it silently, so reject it up front.
+    for (const [key, value] of Object.entries(args.extraVars ?? {})) {
+        if (pulumi.Output.isInstance(value)) {
+            throw new Error(
+                `ansibleProvision("${name}"): extraVars.${key} is a pulumi Output, which cannot survive ` +
+                `JSON encoding. Pass it over SSH out-of-band instead — see lxcs/authentik/index.ts.`,
+            );
+        }
+    }
+
     const extraVarsJson = args.extraVars ? JSON.stringify(args.extraVars) : "{}";
 
     return new command.local.Command(name, {
