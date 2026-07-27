@@ -29,6 +29,8 @@ export interface ProxmoxMachineArgs {
         port: number;
         protected?: boolean;
         entrypoint?: string;
+        /** Extra Consul tags, e.g. Traefik middleware definitions owned by this service. */
+        extraTags?: string[];
     };
     consulProvider?: consul.Provider;
 }
@@ -115,6 +117,7 @@ export class ProxmoxMachine extends pulumi.ComponentResource {
             `traefik.http.routers.${name}.entrypoints=${rp.entrypoint || "web"}`,
             `traefik.http.services.${name}.loadbalancer.server.port=${rp.port}`,
             ...(rp.protected ? [`traefik.http.routers.${name}.middlewares=authentik@consulcatalog`] : []),
+            ...(rp.extraTags ?? []),
         ];
 
         // Register a node for the machine if it doesn't exist

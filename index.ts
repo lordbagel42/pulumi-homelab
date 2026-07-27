@@ -112,6 +112,12 @@ const debianCloudImage = new proxmox.download.File(
         nodeName: "optiplex",
         url: "https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-genericcloud-amd64.qcow2",
         fileName: "debian-12-genericcloud-amd64.qcow2",
+        // The "latest" URL is a moving target: Debian reissues the image and the
+        // size check then forces a replacement, which PVE refuses because the old
+        // file is still on disk (Pulumi creates the replacement before deleting).
+        // Skip the size check, and let a genuine replacement clobber the old file.
+        overwrite: false,
+        overwriteUnmanaged: true,
     },
     { provider },
 );

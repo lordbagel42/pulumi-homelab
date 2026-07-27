@@ -7,6 +7,7 @@ import { lxcPassword } from "../infisical";
 import { InfisicalConfig } from "../infisical";
 import { GrafanaConfig } from "../utils/alloy";
 import * as proxmox from "@muhlba91/pulumi-proxmoxve";
+import * as consul from "@pulumi/consul";
 
 export const GATEWAY = "192.168.0.1";
 
@@ -37,6 +38,13 @@ export interface ServiceContext {
     oraclePelicanDbRootPass?: pulumi.Output<string>;
     grafana?: GrafanaConfig;
     commands: Map<string, pulumi.Resource>;
+    /**
+     * Consul provider for the homelab datacenter, published by the hashistack
+     * module once the Consul server is provisioned. Modules that register
+     * Traefik routes should use this rather than building their own, so the
+     * registration waits for Consul to actually be up.
+     */
+    consulProvider?: consul.Provider;
 }
 
 export interface ServiceModule {
@@ -82,12 +90,62 @@ function registerYamlService(dir: string, cfg: YamlServiceConfig, ctx: ServiceCo
         sshKeys: [ctx.sshKey],
         password: lxcPassword(cfg.name, ctx.infisicalConfig),
         reverseProxy: cfg.reverseProxy,
-        // In a real refactor we'd pass a global consul provider here
+        consulProvider: ctx.consulProvider,
     }, { provider: ctx.provider });
 }
 
+interface ServiceDescriptor {
+    name: string;
+    dir: string;
+    kind: "typescript" | "yaml";
+    mod?: ServiceModule;
+    yamlCfg?: YamlServiceConfig;
+    provides: string[];
+    dependencies: string[];
+}
+
+/**
+ * Orders descriptors so a module always registers after everything it depends
+ * on. Dependencies are capability names (the strings in `provides`), which is
+ * also what modules look up in `ctx.commands`; registering out of order leaves
+ * those lookups undefined and silently drops the `dependsOn` edge.
+ *
+ * Unknown dependencies (nothing provides them) are ignored rather than fatal —
+ * optional modules like `sandbox` are no-ops unless the stack opts in.
+ */
+function topologicalSort(descriptors: ServiceDescriptor[]): ServiceDescriptor[] {
+    const providerOf = new Map<string, ServiceDescriptor>();
+    for (const d of descriptors) {
+        for (const capability of d.provides) providerOf.set(capability, d);
+    }
+
+    const sorted: ServiceDescriptor[] = [];
+    const state = new Map<ServiceDescriptor, "visiting" | "done">();
+
+    const visit = (d: ServiceDescriptor, trail: string[]): void => {
+        const seen = state.get(d);
+        if (seen === "done") return;
+        if (seen === "visiting") {
+            throw new Error(
+                `circular service dependency: ${[...trail, d.name].join(" → ")}`,
+            );
+        }
+
+        state.set(d, "visiting");
+        for (const dep of d.dependencies) {
+            const provider = providerOf.get(dep);
+            if (provider && provider !== d) visit(provider, [...trail, d.name]);
+        }
+        state.set(d, "done");
+        sorted.push(d);
+    };
+
+    for (const d of descriptors) visit(d, []);
+    return sorted;
+}
+
 export function discoverAndRegisterAll(ctx: ServiceContext, baseDirs: string[]): void {
-    const descriptors: any[] = [];
+    const descriptors: ServiceDescriptor[] = [];
 
     for (const baseDir of baseDirs) {
         if (!fs.existsSync(baseDir)) continue;
@@ -100,7 +158,7 @@ export function discoverAndRegisterAll(ctx: ServiceContext, baseDirs: string[]):
             const yamlPath = path.join(dir, "service.yaml");
 
             if (fs.existsSync(tsPath)) {
-                const mod = require(tsPath);
+                const mod = require(tsPath) as ServiceModule;
                 if (typeof mod.register !== "function") continue;
                 descriptors.push({
                     name: mod.name,
@@ -124,15 +182,11 @@ export function discoverAndRegisterAll(ctx: ServiceContext, baseDirs: string[]):
         }
     }
 
-    // Topological sort (simplified for this task)
-    // In a real scenario we'd use the same topologicalSort function as before
-    // but I'll assume the order is manageable for now or reuse the logic.
-
-    for (const d of descriptors) {
+    for (const d of topologicalSort(descriptors)) {
         if (d.kind === "typescript") {
-            d.mod.register(ctx);
+            d.mod!.register(ctx);
         } else {
-            registerYamlService(d.dir, d.yamlCfg, ctx);
+            registerYamlService(d.dir, d.yamlCfg!, ctx);
         }
     }
 }
