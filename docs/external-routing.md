@@ -69,12 +69,22 @@ takes effect if the tunnel is ever switched to local management.
 
 ## Current routes
 
-| Hostname                      | Edge    | Backend                       |
-| ----------------------------- | ------- | ----------------------------- |
-| `auth.bagelindustries.com`    | homelab | authentik (220:9000)          |
+| Hostname                      | Edge    | Backend                          |
+| ----------------------------- | ------- | -------------------------------- |
+| `auth.bagelindustries.com`    | homelab | authentik (220:9000)             |
 | `demo.bagelindustries.com`    | homelab | `demo` job — Authentik-protected |
-| `lookout.raygen.dev`          | homelab | `lookout` job                 |
-| `panel.bagelindustries.com`   | oracle  | `oracle-pelican` job          |
+| `lookout.raygen.dev`          | homelab | `lookout` job                    |
+| `hellonomad.raygen.dev`       | homelab | `hello-world` job (smoke test)   |
+| `consul.bagelindustries.com`  | homelab | Consul UI (201:8500) — **open**  |
+| `nomad.bagelindustries.com`   | homelab | Nomad UI (202:4646) — **open**   |
+| `panel.bagelindustries.com`   | oracle  | `oracle-pelican` job             |
+
+> **The two cluster UIs are unauthenticated.** Anyone who reaches
+> `consul.` or `nomad.` gets a full admin interface — the Nomad UI can submit
+> jobs. They were registered that way before the framework refactor and are kept
+> as-is here so the routes are not silently dropped, but they should either get
+> `authentik@consulcatalog` on their routers (once a matching Authentik provider
+> exists) or be taken off the tunnel entirely and reached over NetBird.
 
 ## Authentik-protected routes
 

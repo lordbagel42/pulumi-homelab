@@ -8,6 +8,7 @@ import { InfisicalConfig } from "../infisical";
 import { GrafanaConfig } from "../utils/alloy";
 import * as proxmox from "@muhlba91/pulumi-proxmoxve";
 import * as consul from "@pulumi/consul";
+import * as nomad from "@pulumi/nomad";
 
 export const GATEWAY = "192.168.0.1";
 
@@ -45,6 +46,11 @@ export interface ServiceContext {
      * registration waits for Consul to actually be up.
      */
     consulProvider?: consul.Provider;
+    /**
+     * Nomad provider for the homelab cluster, published by the hashistack
+     * module once the Nomad server is provisioned.
+     */
+    nomadProvider?: nomad.Provider;
 }
 
 export interface ServiceModule {

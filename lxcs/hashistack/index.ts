@@ -1,7 +1,9 @@
+import * as fs from "fs";
 import * as path from "path";
 import * as pulumi from "@pulumi/pulumi";
 import * as command from "@pulumi/command";
 import * as consul from "@pulumi/consul";
+import * as nomad from "@pulumi/nomad";
 import { ProxmoxMachine } from "../../framework/proxmox-machine";
 import { ansibleProvision } from "../../utils/ansible";
 import { lxcPassword } from "../../infisical";
@@ -104,6 +106,15 @@ export function register(ctx: ServiceContext) {
         dependsOn: [nomadMachine, consulProvision],
     });
     ctx.commands.set("nomad-setup", nomadProvision);
+
+    // Shared by every module that submits a homelab job. Named to match the
+    // provider already in state so existing jobs are updated, not replaced.
+    // (lookout keeps its own `homelab-nomad` provider — moving a live job with
+    // a persistent volume across providers buys nothing.)
+    const nomadProvider = new nomad.Provider("hashistack-nomad", {
+        address: `http://${NOMAD_IP}:4646`,
+    }, { dependsOn: [nomadProvision] });
+    ctx.nomadProvider = nomadProvider;
 
     const traefikMachine = new ProxmoxMachine("traefik", {
         type: "lxc",
@@ -231,4 +242,63 @@ $SSH "$HOST" "systemctl enable --now cloudflared && systemctl restart cloudflare
     }, { dependsOn: [cloudflaredProvision] });
 
     ctx.commands.set("cloudflared-setup", cloudflaredToken);
+
+    // ── Cluster UI routes ──────────────────────────────────────────────────────
+    // These were dropped from the code by the framework refactor but never
+    // deleted, because every deploy since then failed before the delete phase.
+    // Re-declared here so they are adopted rather than torn down — they are two
+    // live external routes.
+    //
+    // NOTE: both are unauthenticated admin UIs. They carry no `protected` flag
+    // today, matching how they were registered before; see the note in
+    // docs/external-routing.md.
+    registerUiRoute(consulProvider, consulProvision, {
+        service: "consul-ui",
+        node: "consul-ui-svc",
+        address: CONSUL_IP_CONST,
+        port: 8500,
+        domain: "consul.bagelindustries.com",
+    });
+
+    registerUiRoute(consulProvider, consulProvision, {
+        service: "nomad-ui",
+        node: "nomad-ui-svc",
+        address: NOMAD_IP,
+        port: 4646,
+        domain: "nomad.bagelindustries.com",
+    });
+
+    // Smoke test for the new client: if `hellonomad.raygen.dev` answers, then
+    // placement, bridge networking and the tunnel are all working end to end.
+    new nomad.Job("hello-world", {
+        jobspec: fs.readFileSync(path.join(__dirname, "hello-world.nomad.hcl"), "utf-8"),
+    }, { provider: nomadProvider, dependsOn: [nomadClientProvision] });
+}
+
+interface UiRoute {
+    service: string;
+    node: string;
+    address: string;
+    port: number;
+    domain: string;
+}
+
+function registerUiRoute(provider: consul.Provider, dependsOn: pulumi.Resource, r: UiRoute): void {
+    const node = new consul.Node(`${r.service}-node`, {
+        name: r.node,
+        address: r.address,
+    }, { provider, dependsOn: [dependsOn] });
+
+    new consul.Service(`${r.service}-service`, {
+        name: r.service,
+        node: node.name,
+        address: r.address,
+        port: r.port,
+        tags: [
+            "traefik.enable=true",
+            `traefik.http.routers.${r.service}.rule=Host(\`${r.domain}\`)`,
+            `traefik.http.routers.${r.service}.entrypoints=web`,
+            `traefik.http.services.${r.service}.loadbalancer.server.port=${r.port}`,
+        ],
+    }, { provider, dependsOn: [node] });
 }
