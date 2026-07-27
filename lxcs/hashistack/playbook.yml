@@ -428,8 +428,23 @@
               systemctl list-unit-files "$unit.service" --no-legend | grep -q . || continue
               echo "===== $unit ====="
               systemctl is-active "$unit" || true
+              systemctl status "$unit" --no-pager -l 2>&1 | tail -25 || true
               journalctl -u "$unit" -n 40 --no-pager 2>/dev/null || true
             done
+            # journald returns "-- No entries --" in these LXCs even for units
+            # that are running, so the journal alone explains nothing. Run any
+            # dead agent in the foreground to capture what it prints on startup.
+            for agent in consul nomad; do
+              [ -x "/usr/local/bin/$agent" ] || continue
+              [ -d "/etc/$agent.d" ] || continue
+              systemctl is-active --quiet "$agent" && continue
+              echo "===== $agent foreground start ====="
+              timeout 20 "/usr/local/bin/$agent" agent -config-dir="/etc/$agent.d/" 2>&1 | tail -30 || true
+              echo "===== $agent config ====="
+              cat "/etc/$agent.d"/*.hcl 2>/dev/null || true
+            done
+            echo "===== disk ====="
+            df -h / /var 2>/dev/null || true
           register: agent_journals
           changed_when: false
           failed_when: false
