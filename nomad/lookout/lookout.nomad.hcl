@@ -55,6 +55,12 @@ job "lookout" {
       env {
         DATABASE_URL         = "postgresql://lookout:__PG_PASSWORD__@127.0.0.1:5432/lookout"
         PORT                 = "3000"
+        # Without this the server binds 127.0.0.1 inside the container, so the
+        # bridge-mapped host port forwards into the alloc netns and finds
+        # nothing listening — the Consul check fails with "connection refused"
+        # and Traefik drops the route, even though the app started cleanly and
+        # applied its migrations.
+        HOST                 = "0.0.0.0"
         BASE_URL             = "https://lookout.raygen.dev"
         ADMIN_USERNAME       = "__ADMIN_USERNAME__"
         ADMIN_PASSWORD       = "__ADMIN_PASSWORD__"
