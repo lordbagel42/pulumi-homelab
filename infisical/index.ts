@@ -24,6 +24,55 @@ export function readSecret(secretName: string, config: InfisicalConfig): pulumi.
     );
 }
 
+/**
+ * Reads a secret that may legitimately be absent, returning "" instead of
+ * failing. Unlike readSecret it never creates the secret, so an unset value
+ * stays unset in Infisical and can be filled in later without a code change.
+ *
+ * Use this for values a service can start without. A missing one must not be
+ * able to take down an unrelated part of the stack.
+ */
+export function optionalSecret(secretName: string, config: InfisicalConfig): pulumi.Output<string> {
+    const host = config.host ?? "https://app.infisical.com";
+    const encodedPath = encodeURIComponent(config.secretPath);
+
+    const cmd = new command.local.Command(`optional-secret-${secretName}`, {
+        interpreter: ["/bin/bash", "-c"],
+        create: `
+set -euo pipefail
+
+AUTH_RESP=$(curl -s -X POST "${host}/api/v1/auth/universal-auth/login" \\
+    -H "Content-Type: application/json" \\
+    -d "$(jq -n --arg c "$_CLIENT_ID" --arg s "$_CLIENT_SECRET" '{clientId:$c,clientSecret:$s}')")
+ACCESS_TOKEN=$(printf '%s' "$AUTH_RESP" | jq -r '.accessToken // empty')
+if [ -z "$ACCESS_TOKEN" ]; then
+    printf 'Infisical auth failed: %s\\n' "$AUTH_RESP" >&2
+    exit 1
+fi
+
+RESP=$(mktemp)
+STATUS=$(curl -s -o "$RESP" -w "%{http_code}" \\
+    -H "Authorization: Bearer $ACCESS_TOKEN" \\
+    "${host}/api/v3/secrets/raw/${secretName}?workspaceId=$_PROJECT_ID&environment=${config.environment}&secretPath=${encodedPath}&type=shared")
+
+if [ "$STATUS" = "200" ]; then
+    jq -r '.secret.secretValue' "$RESP"
+else
+    printf 'optionalSecret: "%s" not set at "%s" (HTTP %s) — continuing with an empty value\\n' \\
+        '${secretName}' '${config.secretPath}' "$STATUS" >&2
+fi
+rm -f "$RESP"
+        `.trim(),
+        environment: {
+            _CLIENT_ID: config.clientId,
+            _CLIENT_SECRET: config.clientSecret,
+            _PROJECT_ID: config.projectId,
+        },
+    });
+
+    return pulumi.secret(cmd.stdout);
+}
+
 export function lxcPassword(containerName: string, config: InfisicalConfig): pulumi.Output<string> {
     return _getOrCreateSecret(
         `lxc-root-${containerName}`,
