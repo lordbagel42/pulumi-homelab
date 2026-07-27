@@ -85,16 +85,13 @@
         path: /opt/authentik
         state: directory
 
-    - name: Write Authentik .env
-      copy:
-        dest: /opt/authentik/.env
-        content: |
-          PG_PASS={{ pg_pass }}
-          SECRET_KEY={{ secret_key }}
-          AUTHENTIK_BOOTSTRAP_PASSWORD={{ bootstrap_password }}
-          AUTHENTIK_BOOTSTRAP_TOKEN={{ bootstrap_token }}
-          AUTHENTIK_BOOTSTRAP_EMAIL={{ bootstrap_email }}
-        mode: "0600"
+    # /opt/authentik/.env is deliberately NOT written here. It holds five
+    # secrets, and ansibleProvision JSON-encodes its extraVars, which cannot
+    # carry a pulumi.Output — stringifying one yields Pulumi's "Calling
+    # [toJSON] on an [Output<T>] is not supported" message, which lands in the
+    # file as prose and makes `docker compose` fail with "key cannot contain a
+    # space". Pulumi writes it over SSH instead (see lxcs/authentik/index.ts),
+    # and starts the stack once it is in place.
 
     - name: Write Docker Compose file
       copy:
@@ -153,7 +150,5 @@
                 redis: { condition: service_healthy }
           volumes: { database: {}, redis: {}, media: {}, certs: {}, custom-templates: {} }
 
-    - name: Start Authentik
-      shell: "docker compose up -d"
-      args:
-        chdir: /opt/authentik
+    # Starting the stack is the credentials step's job — it is the one that
+    # knows .env is present and current.
