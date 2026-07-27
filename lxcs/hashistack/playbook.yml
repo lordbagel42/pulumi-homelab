@@ -9,6 +9,10 @@
     datacenter: "homelab"
     host_volumes: []
     trusted_proxy_ips: ["127.0.0.1/32"]
+    # Per-agent ExecStart: the config flag differs between Consul and Nomad.
+    agent_exec_start:
+      consul: /usr/local/bin/consul agent -config-dir=/etc/consul.d/
+      nomad: /usr/local/bin/nomad agent -config=/etc/nomad.d/
   tasks:
     - name: Install dependencies
       apt:
@@ -92,6 +96,11 @@
         content: |
           data_dir  = "/var/lib/nomad"
           bind_addr = "0.0.0.0"
+          advertise {
+            http = "{{ ansible_default_ipv4.address }}"
+            rpc  = "{{ ansible_default_ipv4.address }}"
+            serf = "{{ ansible_default_ipv4.address }}"
+          }
           server {
             enabled = true
             bootstrap_expect = 1
@@ -166,6 +175,11 @@
           datacenter = "{{ datacenter }}"
           data_dir  = "/var/lib/nomad"
           bind_addr = "0.0.0.0"
+          advertise {
+            http = "{{ ansible_default_ipv4.address }}"
+            rpc  = "{{ ansible_default_ipv4.address }}"
+            serf = "{{ ansible_default_ipv4.address }}"
+          }
           client {
             enabled  = true
             cni_path = "/opt/cni/bin"
@@ -306,6 +320,12 @@
 
     # ── Services ───────────────────────────────────────────────────────────────
 
+    # The two agents do NOT share a config flag: Consul takes -config-dir,
+    # Nomad takes -config (which also accepts a directory). Templating
+    # "-config-dir" for both made Nomad reject its arguments, print its usage
+    # text and exit 1 after ~140ms, so the Nomad server has never actually run
+    # under systemd here. oracle-setup.sh gets this right, which is why the
+    # oracle client works.
     - name: Setup systemd services
       copy:
         dest: "/etc/systemd/system/{{ item }}.service"
@@ -315,8 +335,10 @@
           After=network-online.target
           Wants=network-online.target
           [Service]
-          ExecStart=/usr/local/bin/{{ item }} agent -config-dir=/etc/{{ item }}.d/
+          ExecStart={{ agent_exec_start[item] }}
           Restart=always
+          RestartSec=5
+          LimitNOFILE=65536
           [Install]
           WantedBy=multi-user.target
       loop: "{{ services }}"
@@ -439,7 +461,11 @@
               [ -d "/etc/$agent.d" ] || continue
               systemctl is-active --quiet "$agent" && continue
               echo "===== $agent foreground start ====="
-              timeout 20 "/usr/local/bin/$agent" agent -config-dir="/etc/$agent.d/" 2>&1 | tail -30 || true
+              case "$agent" in
+                consul) flag="-config-dir" ;;
+                *)      flag="-config" ;;
+              esac
+              timeout 20 "/usr/local/bin/$agent" agent "$flag=/etc/$agent.d/" 2>&1 | tail -30 || true
               echo "===== $agent config ====="
               cat "/etc/$agent.d"/*.hcl 2>/dev/null || true
             done
