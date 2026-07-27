@@ -89,6 +89,11 @@ jobs:
           comment-on-summary: true
         env:
           PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
+          # pulumi-proxmoxve is not on the Pulumi registry — it is pulled from
+          # GitHub releases, which rate-limits unauthenticated runners to 60
+          # requests/hour and then fails the update with a 403. Authenticating
+          # the plugin download raises that to 1000/hour.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HOSTED: "true"
 
       - name: Disconnect Netbird
