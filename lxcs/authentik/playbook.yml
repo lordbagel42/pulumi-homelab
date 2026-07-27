@@ -97,13 +97,20 @@
       copy:
         dest: /opt/authentik/docker-compose.yml
         content: |
-          version: "3.4"
           services:
             postgresql:
               image: docker.io/library/postgres:16-alpine
               restart: unless-stopped
+              # Literal db/user rather than ${POSTGRES_DB}/${POSTGRES_USER}:
+              # compose interpolates ${...} from the .env at parse time, not
+              # from this service's own environment block, so those would
+              # expand to nothing and pg_isready would never report healthy.
               healthcheck:
-                test: ["CMD-SHELL", "pg_isready -d ${POSTGRES_DB} -U ${POSTGRES_USER}"]
+                test: ["CMD-SHELL", "pg_isready -d authentik -U authentik"]
+                start_period: 20s
+                interval: 10s
+                timeout: 5s
+                retries: 10
               volumes: [database:/var/lib/postgresql/data]
               environment:
                 POSTGRES_PASSWORD: ${PG_PASS}
@@ -112,6 +119,15 @@
             redis:
               image: docker.io/library/redis:alpine
               restart: unless-stopped
+              # server and worker both wait on redis with condition:
+              # service_healthy, and compose refuses to start a dependency that
+              # declares no healthcheck at all.
+              healthcheck:
+                test: ["CMD-SHELL", "redis-cli ping | grep PONG"]
+                start_period: 20s
+                interval: 10s
+                timeout: 3s
+                retries: 10
               volumes: [redis:/data]
             server:
               image: ghcr.io/goauthentik/server:latest
