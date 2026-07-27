@@ -81,11 +81,15 @@
         state: directory
       when: role in ['nomad', 'nomad-client']
 
+    # Deliberately no `datacenter` here. A job's `datacenters` list is matched
+    # against the *client's* datacenter, not the server's — oracle's client sits
+    # in datacenter "oracle" and places against this same server. Setting it on
+    # the server changes nothing about placement, and changing it on a server
+    # that already holds raft state stops the agent from coming back up.
     - name: Configure Nomad Server
       copy:
         dest: /etc/nomad.d/nomad.hcl
         content: |
-          datacenter = "{{ datacenter }}"
           data_dir  = "/var/lib/nomad"
           bind_addr = "0.0.0.0"
           server {
@@ -348,66 +352,90 @@
     # instant this play returns, so without these gates the first API call after
     # a restart races the agent and fails with "connection refused".
 
-    - name: Wait for the Consul agent to listen
-      wait_for:
-        host: 127.0.0.1
-        port: 8500
-        timeout: 120
-      when: services is defined and 'consul' in services
+    - name: Verify the agents are actually serving
+      block:
+        - name: Wait for the Consul agent to listen
+          wait_for:
+            host: 127.0.0.1
+            port: 8500
+            timeout: 120
+          when: services is defined and 'consul' in services
 
-    # Catalog writes are rejected until a leader exists, so port-open is not
-    # enough. /v1/status/leader returns a bare "" until election completes.
-    #
-    # The `| default(...)` guards matter: while the agent is still down, `uri`
-    # returns a result with no `status` key at all, and a bare `.status` makes
-    # the conditional raise, which aborts the task instead of retrying it.
-    - name: Wait for a Consul leader
-      uri:
-        url: http://127.0.0.1:8500/v1/status/leader
-        return_content: yes
-      register: consul_leader
-      until: (consul_leader.status | default(0)) == 200 and ((consul_leader.content | default('')) | length) > 2
-      retries: 30
-      delay: 2
-      when: role == 'consul'
+        # Catalog writes are rejected until a leader exists, so port-open is not
+        # enough. /v1/status/leader returns a bare "" until election completes.
+        #
+        # The `| default(...)` guards matter: while the agent is still down, `uri`
+        # returns a result with no `status` key at all, and a bare `.status` makes
+        # the conditional raise, which aborts the task instead of retrying it.
+        - name: Wait for a Consul leader
+          uri:
+            url: http://127.0.0.1:8500/v1/status/leader
+            return_content: yes
+          register: consul_leader
+          until: (consul_leader.status | default(0)) == 200 and ((consul_leader.content | default('')) | length) > 2
+          retries: 30
+          delay: 2
+          when: role == 'consul'
 
-    - name: Wait for the Nomad agent to listen
-      wait_for:
-        host: 127.0.0.1
-        port: 4646
-        timeout: 120
-      when: services is defined and 'nomad' in services
+        - name: Wait for the Nomad agent to listen
+          wait_for:
+            host: 127.0.0.1
+            port: 4646
+            timeout: 120
+          when: services is defined and 'nomad' in services
 
-    - name: Wait for a Nomad leader
-      uri:
-        url: http://127.0.0.1:4646/v1/status/leader
-        return_content: yes
-      register: nomad_leader
-      until: (nomad_leader.status | default(0)) == 200 and ((nomad_leader.content | default('')) | length) > 2
-      retries: 30
-      delay: 2
-      when: role == 'nomad'
+        - name: Wait for a Nomad leader
+          uri:
+            url: http://127.0.0.1:4646/v1/status/leader
+            return_content: yes
+          register: nomad_leader
+          until: (nomad_leader.status | default(0)) == 200 and ((nomad_leader.content | default('')) | length) > 2
+          retries: 30
+          delay: 2
+          when: role == 'nomad'
 
-    # Submitting a job to a datacenter with no ready client does not fail — the
-    # allocation just sits queued forever. Fail loudly here instead.
-    - name: Wait for this client to register with the Nomad server
-      uri:
-        url: "http://{{ nomad_ip }}:4646/v1/nodes"
-        return_content: yes
-      register: nomad_nodes
-      until: >
-        (nomad_nodes.status | default(0)) == 200 and
-        ((nomad_nodes.json | default([]))
-          | selectattr('Datacenter', 'equalto', datacenter)
-          | selectattr('Status', 'equalto', 'ready')
-          | list | length) > 0
-      retries: 30
-      delay: 5
-      when: role == 'nomad-client'
+        # Submitting a job to a datacenter with no ready client does not fail — the
+        # allocation just sits queued forever. Fail loudly here instead.
+        - name: Wait for this client to register with the Nomad server
+          uri:
+            url: "http://{{ nomad_ip }}:4646/v1/nodes"
+            return_content: yes
+          register: nomad_nodes
+          until: >
+            (nomad_nodes.status | default(0)) == 200 and
+            ((nomad_nodes.json | default([]))
+              | selectattr('Datacenter', 'equalto', datacenter)
+              | selectattr('Status', 'equalto', 'ready')
+              | list | length) > 0
+          retries: 30
+          delay: 5
+          when: role == 'nomad-client'
 
-    - name: Wait for Traefik to listen
-      wait_for:
-        host: 127.0.0.1
-        port: 80
-        timeout: 120
-      when: role == 'traefik'
+        - name: Wait for Traefik to listen
+          wait_for:
+            host: 127.0.0.1
+            port: 80
+            timeout: 120
+          when: role == 'traefik'
+
+      # A bare "Timeout when waiting for 127.0.0.1:4646" says nothing about
+      # why the agent died. Surface the journals in the failure itself so a
+      # broken config is diagnosable from the deploy log alone.
+      rescue:
+        - name: Collect service journals
+          shell: |
+            for unit in consul nomad traefik cloudflared; do
+              systemctl list-unit-files "$unit.service" --no-legend | grep -q . || continue
+              echo "===== $unit ====="
+              systemctl is-active "$unit" || true
+              journalctl -u "$unit" -n 40 --no-pager 2>/dev/null || true
+            done
+          register: agent_journals
+          changed_when: false
+          failed_when: false
+
+        - name: Fail with the agent journals attached
+          fail:
+            msg: |
+              An agent did not come up on {{ inventory_hostname }} (role={{ role }}).
+              {{ agent_journals.stdout | default('no journal output') }}
