@@ -71,21 +71,30 @@ To rotate: delete `/var/lib/mcp-auth/mcp-api-key`, revoke the old key in the DB,
 and re-run the seed script (`cd /opt/mcp-auth-gateway && node seed.mjs` with the
 gateway env sourced).
 
-## Enabling it
+## Deployment
 
-The module is a no-op unless the stack opts in:
+The module always deploys. There is no feature flag and nothing to set before a
+deploy will create the VM.
+
+Two optional overrides, both with working defaults:
 
 ```bash
-pulumi config set SANDBOX_ENABLED true
-# optional: the URL Poke reaches the gateway on (default http://192.168.0.231:8080)
+# URL Poke reaches the gateway on (default http://192.168.0.231:8080)
 pulumi config set SANDBOX_PUBLIC_URL https://sandbox.example.com
+# gateway admin account (default poke@sandbox.local)
+pulumi config set SANDBOX_ADMIN_EMAIL you@example.com
 ```
 
-It also expects an `ANTHROPIC_API_KEY` secret in Infisical under the `/sandbox`
-path (for Claude Code). Pulumi generates the better-auth secret and the gateway
-admin password automatically (persisted in Infisical) and injects them, along
-with the Anthropic key, into `/etc/sandbox/*.env` over SSH — none of these are
-passed through Ansible extra-vars, which cannot carry a secret.
+`ANTHROPIC_API_KEY` in Infisical under `/sandbox` is **optional**. Without it the
+VM, the auth gateway and the filesystem bridge all come up normally and only
+`claude-code-mcp` stays down; the deploy logs a warning rather than failing. Add
+the key to Infisical whenever you like and the next deploy picks it up — no code
+change needed.
+
+Pulumi generates the better-auth secret and the gateway admin password
+automatically (persisted in Infisical) and injects them, along with the
+Anthropic key when present, into `/etc/sandbox/*.env` over SSH — none of these
+are passed through Ansible extra-vars, which cannot carry a secret.
 
 ## Security notes
 

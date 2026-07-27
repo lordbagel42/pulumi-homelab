@@ -3,7 +3,7 @@ import * as pulumi from "@pulumi/pulumi";
 import * as command from "@pulumi/command";
 import { ProxmoxMachine } from "../../framework/proxmox-machine";
 import { ansibleProvision } from "../../utils/ansible";
-import { readSecret, managedSecret } from "../../infisical";
+import { optionalSecret, managedSecret } from "../../infisical";
 import { ip } from "../../framework";
 import type { ServiceContext } from "../../framework";
 
@@ -17,11 +17,15 @@ import type { ServiceContext } from "../../framework";
 // The raw MCP bridges are protected by a better-auth gateway (API-key auth) that
 // is the only network-facing port; the bridges themselves are firewalled off.
 //
-// The module is OPTIONAL. It only provisions anything when the stack opts in:
+// This module always deploys — no config flag, no required secret. Everything
+// it needs beyond the shared SSH key and VM password is either generated and
+// persisted automatically (the better-auth secret and gateway admin password)
+// or optional (ANTHROPIC_API_KEY at /sandbox in Infisical, which only
+// claude-code-mcp needs).
 //
-//   pulumi config set SANDBOX_ENABLED true
-//
-// and expects an `ANTHROPIC_API_KEY` secret to exist in Infisical under /sandbox.
+// Optional overrides, both with working defaults:
+//   pulumi config set SANDBOX_PUBLIC_URL   https://sandbox.example.com
+//   pulumi config set SANDBOX_ADMIN_EMAIL  you@example.com
 export const name = "sandbox";
 export const provides = ["sandbox-setup", "sandbox-mcp"];
 export const dependencies: string[] = [];
@@ -39,10 +43,6 @@ const WORKSPACE_DIR = `/home/${SANDBOX_USER}/workspace`;
 
 export function register(ctx: ServiceContext): void {
     const config = new pulumi.Config();
-    if (!config.getBoolean("SANDBOX_ENABLED")) {
-        // Not opted in — do nothing so the module stays a no-op on most stacks.
-        return;
-    }
 
     // Public URL Poke reaches the gateway on. Defaults to the LAN address; set
     // this to the tunnel/reverse-proxy URL when exposing the sandbox externally.
@@ -89,7 +89,12 @@ export function register(ctx: ServiceContext): void {
     // carry them). Secrets travel through the command environment and are piped
     // to remote files via stdin, so they never land in plaintext in Pulumi state
     // nor in a remote process's argv.
-    const anthropicApiKey = readSecret("ANTHROPIC_API_KEY", {
+    // Optional, not required: readSecret aborts the whole update when a key is
+    // absent, so a missing ANTHROPIC_API_KEY used to take down every unrelated
+    // resource in the stack. The VM, the gateway and the filesystem bridge all
+    // come up without it; only Claude Code needs it, and it can be added to
+    // Infisical at /sandbox later without touching this code.
+    const anthropicApiKey = optionalSecret("ANTHROPIC_API_KEY", {
         ...ctx.infisicalConfig,
         secretPath: "/sandbox",
     });
@@ -123,7 +128,14 @@ printf 'ANTHROPIC_API_KEY=%s\n' "$_ANTHROPIC_API_KEY" | \\
 
 # Restart so the gateway picks up the injected secret, then seed the API key.
 # seed runs with '&&' so a seeding failure fails the whole resource (no silent success).
-$SSH "$HOST" "set -a; . /etc/sandbox/gateway.env; set +a; export AUTH_DB=/var/lib/mcp-auth/auth.db HOME=/home/${SANDBOX_USER}; cd /opt/mcp-auth-gateway; systemctl restart mcp-auth-gateway claude-code-mcp filesystem-mcp && sudo -u ${SANDBOX_USER} -E node seed.mjs"
+$SSH "$HOST" "set -a; . /etc/sandbox/gateway.env; set +a; export AUTH_DB=/var/lib/mcp-auth/auth.db HOME=/home/${SANDBOX_USER}; cd /opt/mcp-auth-gateway; systemctl restart mcp-auth-gateway filesystem-mcp && sudo -u ${SANDBOX_USER} -E node seed.mjs"
+
+# claude-code-mcp is the one unit that genuinely needs ANTHROPIC_API_KEY. Keep it
+# out of the '&&' above so an unset key leaves the sandbox and its gateway fully
+# deployed instead of failing the update.
+if ! $SSH "$HOST" "systemctl restart claude-code-mcp"; then
+  echo "warning: claude-code-mcp did not start — set ANTHROPIC_API_KEY in Infisical at /sandbox" >&2
+fi
         `.trim(),
         environment: {
             _SSH_KEY: ctx.sshPrivateKey,
