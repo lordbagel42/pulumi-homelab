@@ -12,7 +12,7 @@ import type { ServiceContext } from "../../framework";
 // Issue 9:  provision a dedicated, persistent sandbox VM in Proxmox for Poke to
 //           run code and stateful tools.
 // Issue 10: configure that VM to host persistent MCP bridge servers — Claude Code
-//           and other stateful/"dangerous" tools — reachable over the network.
+//           and other stateful/\"dangerous\" tools — reachable over the network.
 //
 // The raw MCP bridges are protected by a better-auth gateway (API-key auth) that
 // is the only network-facing port; the bridges themselves are firewalled off.
@@ -56,7 +56,7 @@ export function register(ctx: ServiceContext): void {
         vmId: SANDBOX_VMID,
         ip: SANDBOX_IP,
         cpu: 4,
-        memory: 8192,
+        memory: 12288,
         disk: 40,
         importFrom: ctx.debianCloudImageId,
         userDataFileId: ctx.cloudInitSnippetId,
