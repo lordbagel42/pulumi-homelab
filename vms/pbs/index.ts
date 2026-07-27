@@ -23,6 +23,10 @@ export function register(ctx: ServiceContext): void {
         nodeName: "inspiron",
         url: "https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-genericcloud-amd64.qcow2",
         fileName: "debian-12-genericcloud-amd64.qcow2",
+        // See the matching note in index.ts — "latest" moves, and the resulting
+        // size-mismatch replacement is what has been failing every deploy.
+        overwrite: false,
+        overwriteUnmanaged: true,
     }, { provider: ctx.provider });
 
     const pbsCloudInit = new proxmox.FileLegacy("pbs-cloud-init", {

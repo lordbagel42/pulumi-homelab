@@ -76,6 +76,13 @@ export function register(ctx: ServiceContext) {
         update_cache: yes
 ```
 
+## Exposing it to the internet
+
+A `reverseProxy` block registers the service in Consul with Traefik tags, and
+Traefik is already behind a Cloudflare tunnel — so the route works externally as
+soon as the hostname points at the tunnel. See [external-routing.md](./external-routing.md)
+for that step and for how the homelab and Oracle edges divide the catalog.
+
 ## IP / VMID convention
 Every static resource follows the rule: **IP last-octet = VMID**.
 Pick an unused ID (201–254) and use `ip(ID)` to get the address.

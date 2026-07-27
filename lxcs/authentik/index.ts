@@ -1,6 +1,4 @@
 import * as path from "path";
-import * as pulumi from "@pulumi/pulumi";
-import * as consul from "@pulumi/consul";
 import { ProxmoxMachine } from "../../framework/proxmox-machine";
 import { ansibleProvision } from "../../utils/ansible";
 import { lxcPassword, managedSecret, readSecret } from "../../infisical";
@@ -32,11 +30,36 @@ export function register(ctx: ServiceContext) {
             domain: "auth.bagelindustries.com",
             port: 9000,
             entrypoint: "web",
+            extraTags: [
+                // Defines the `authentik@consulcatalog` middleware that every
+                // `protected: true` service references — without it those routers
+                // fail to build and their hosts return 500.
+                `traefik.http.middlewares.authentik.forwardauth.address=http://${IP}:9000/outpost.goauthentik.io/auth/traefik`,
+                "traefik.http.middlewares.authentik.forwardauth.trustForwardHeader=true",
+                "traefik.http.middlewares.authentik.forwardauth.authResponseHeaders=" + [
+                    "X-authentik-username",
+                    "X-authentik-groups",
+                    "X-authentik-entitlements",
+                    "X-authentik-email",
+                    "X-authentik-name",
+                    "X-authentik-uid",
+                    "X-authentik-jwt",
+                    "X-authentik-meta-jwks",
+                    "X-authentik-meta-outpost",
+                    "X-authentik-meta-provider",
+                    "X-authentik-meta-app",
+                    "X-authentik-meta-version",
+                ].join(","),
+                // The embedded outpost's callback must resolve on *every*
+                // protected host, not just auth.bagelindustries.com, so it gets
+                // its own high-priority path router.
+                "traefik.http.routers.authentik-outpost.rule=PathPrefix(`/outpost.goauthentik.io/`)",
+                "traefik.http.routers.authentik-outpost.entrypoints=web",
+                "traefik.http.routers.authentik-outpost.priority=100",
+                "traefik.http.routers.authentik-outpost.service=authentik",
+            ],
         },
-        consulProvider: new consul.Provider("authentik-consul", {
-            address: `${CONSUL_IP_CONST}:8500`,
-            scheme: "http",
-        }),
+        consulProvider: ctx.consulProvider,
     }, { provider: ctx.provider });
 
     const provision = ansibleProvision("authentik-provision", {

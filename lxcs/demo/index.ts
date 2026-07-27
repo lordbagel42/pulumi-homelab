@@ -1,6 +1,7 @@
+import * as fs from "fs";
 import * as path from "path";
-import * as command from "@pulumi/command";
-import { NOMAD_IP } from "../hashistack";
+import * as pulumi from "@pulumi/pulumi";
+import * as nomad from "@pulumi/nomad";
 import type { ServiceContext } from "../../framework";
 
 // ── ServiceModule contract ─────────────────────────────────────────────────────
@@ -9,24 +10,21 @@ export const provides = ["demo-deploy"];
 export const dependencies = ["authentik-setup", "nomad-client-setup"];
 
 export function register(ctx: ServiceContext): void {
-    const demoJobPath = path.join(__dirname, "demo.nomad.hcl");
+    if (!ctx.nomadProvider) {
+        throw new Error("demo module requires nomadProvider in ServiceContext");
+    }
+
     const dependsOn = [
         ctx.commands.get("authentik-setup"),
         ctx.commands.get("nomad-client-setup"),
-    ].filter((r): r is import("@pulumi/pulumi").Resource => r !== undefined);
+    ].filter((r): r is pulumi.Resource => r !== undefined);
 
-    const demoCmd = new command.local.Command("demo-deploy", {
-        create: `
-key=$(mktemp)
-chmod 600 "$key"
-printf '%s\n' "$_SSH_KEY" > "$key"
-ssh -i "$key" -o StrictHostKeyChecking=no root@${NOMAD_IP} "nomad job run -" < "${demoJobPath}"
-rc=$?
-rm -f "$key"
-exit $rc
-        `.trim(),
-        environment: { _SSH_KEY: ctx.sshPrivateKey },
-    }, { dependsOn });
+    // A typed Job rather than `nomad job run` over SSH: the job is already in
+    // state under this name, so submitting it any other way would have Pulumi
+    // deregister it again during the delete phase of the same update.
+    const demoJob = new nomad.Job("demo", {
+        jobspec: fs.readFileSync(path.join(__dirname, "demo.nomad.hcl"), "utf-8"),
+    }, { provider: ctx.nomadProvider, dependsOn });
 
-    ctx.commands.set("demo-deploy", demoCmd);
+    ctx.commands.set("demo-deploy", demoJob);
 }

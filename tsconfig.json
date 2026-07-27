@@ -17,6 +17,7 @@
         "framework/**/*.ts",
         "infisical/**/*.ts",
         "lxcs/**/*.ts",
+        "nomad/**/*.ts",
         "utils/**/*.ts",
         "vms/**/*.ts"
     ]

@@ -15,6 +15,10 @@ job "oracle-traefik" {
           "--api.dashboard=true",
           "--api.insecure=true",
           "--entrypoints.web.address=:80",
+          # cloudflared runs on this host and terminates TLS, so its
+          # X-Forwarded-Proto must be trusted or Pelican (BEHIND_PROXY=true)
+          # builds http:// URLs and redirect-loops behind the tunnel.
+          "--entrypoints.web.forwardedHeaders.insecure=true",
           "--entrypoints.websecure.address=:443",
           "--entrypoints.traefik.address=:8082",
           "--providers.consulcatalog.prefix=traefik",

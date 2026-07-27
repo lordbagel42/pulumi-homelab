@@ -5,6 +5,10 @@
     consul_version: "1.20.1"
     nomad_version: "1.9.4"
     traefik_version: "v3.3.1"
+    cni_version: "1.5.1"
+    datacenter: "homelab"
+    host_volumes: []
+    trusted_proxy_ips: ["127.0.0.1/32"]
   tasks:
     - name: Install dependencies
       apt:
@@ -30,12 +34,13 @@
       file:
         path: /etc/consul.d
         state: directory
+      when: role in ['consul', 'nomad', 'traefik', 'nomad-client']
 
     - name: Configure Consul Server
       copy:
         dest: /etc/consul.d/consul.hcl
         content: |
-          datacenter = "homelab"
+          datacenter = "{{ datacenter }}"
           data_dir   = "/var/lib/consul"
           server     = true
           bootstrap_expect = 1
@@ -44,11 +49,13 @@
           bind_addr   = "{{ ansible_default_ipv4.address }}"
       when: role == 'consul'
 
+    # The datacenter must match the server's — Consul's LAN gossip pool refuses
+    # to join across datacenters, and the default would be "dc1".
     - name: Configure Consul Client
       copy:
         dest: /etc/consul.d/consul.hcl
         content: |
-          datacenter = "homelab"
+          datacenter = "{{ datacenter }}"
           data_dir   = "/var/lib/consul"
           retry_join = ["{{ consul_ip }}"]
           bind_addr  = "{{ ansible_default_ipv4.address }}"
@@ -78,7 +85,8 @@
       copy:
         dest: /etc/nomad.d/nomad.hcl
         content: |
-          data_dir = "/var/lib/nomad"
+          datacenter = "{{ datacenter }}"
+          data_dir  = "/var/lib/nomad"
           bind_addr = "0.0.0.0"
           server {
             enabled = true
@@ -89,20 +97,99 @@
           }
       when: role == 'nomad'
 
+    # ── Nomad client: Docker driver + bridge networking ────────────────────────
+
+    - name: Install Docker
+      shell: curl -fsSL https://get.docker.com | sh
+      args:
+        creates: /usr/bin/docker
+      when: role == 'nomad-client'
+
+    - name: Enable Docker
+      systemd:
+        name: docker
+        state: started
+        enabled: yes
+      when: role == 'nomad-client'
+
+    - name: Create CNI plugin directory
+      file:
+        path: /opt/cni/bin
+        state: directory
+      when: role == 'nomad-client'
+
+    # Nomad's bridge network mode (used by the lookout job) is CNI-backed and
+    # silently fails to place allocations without these.
+    - name: Install CNI plugins
+      unarchive:
+        src: "https://github.com/containernetworking/plugins/releases/download/v{{ cni_version }}/cni-plugins-linux-amd64-v{{ cni_version }}.tgz"
+        dest: /opt/cni/bin
+        remote_src: yes
+        creates: /opt/cni/bin/bridge
+      when: role == 'nomad-client'
+
+    - name: Load br_netfilter
+      copy:
+        dest: /etc/modules-load.d/br_netfilter.conf
+        content: "br_netfilter\n"
+      when: role == 'nomad-client'
+
+    - name: Enable bridge netfilter sysctls
+      copy:
+        dest: /etc/sysctl.d/99-nomad-cni.conf
+        content: |
+          net.bridge.bridge-nf-call-iptables = 1
+          net.bridge.bridge-nf-call-ip6tables = 1
+      when: role == 'nomad-client'
+
+    - name: Apply bridge netfilter sysctls
+      shell: modprobe br_netfilter && sysctl -p /etc/sysctl.d/99-nomad-cni.conf
+      changed_when: false
+      when: role == 'nomad-client'
+
+    - name: Create Nomad host volume directories
+      file:
+        path: "{{ item.path }}"
+        state: directory
+        mode: '0755'
+      loop: "{{ host_volumes }}"
+      when: role == 'nomad-client'
+
     - name: Configure Nomad Client
       copy:
         dest: /etc/nomad.d/nomad.hcl
         content: |
-          data_dir = "/var/lib/nomad"
+          datacenter = "{{ datacenter }}"
+          data_dir  = "/var/lib/nomad"
           bind_addr = "0.0.0.0"
           client {
-            enabled = true
-            servers = ["{{ nomad_ip | default('') }}"]
+            enabled  = true
+            cni_path = "/opt/cni/bin"
+
+            server_join {
+              retry_join = ["{{ nomad_ip }}:4647"]
+            }
+          {% for hv in host_volumes %}
+
+            host_volume "{{ hv.name }}" {
+              path      = "{{ hv.path }}"
+              read_only = false
+            }
+          {% endfor %}
           }
           consul {
             address = "127.0.0.1:8500"
           }
+          plugin "docker" {
+            config {
+              volumes {
+                enabled = true
+              }
+            }
+          }
       when: role == 'nomad-client'
+
+    # ── Traefik ────────────────────────────────────────────────────────────────
 
     - name: Install Traefik
       block:
@@ -123,21 +210,97 @@
         state: directory
       when: role == 'traefik'
 
+    # exposedByDefault is off so a service is only routed once it opts in with
+    # traefik.enable=true — otherwise Consul's own agents would get published.
+    # The constraint keeps oracle-tagged services on oracle's own Traefik; both
+    # share this single Consul datacenter.
     - name: Configure Traefik
       copy:
         dest: /etc/traefik/traefik.yml
         content: |
+          global:
+            checkNewVersion: false
+            sendAnonymousUsage: false
           api:
             insecure: true
             dashboard: true
+          log:
+            level: INFO
+          accessLog: {}
           entryPoints:
             web:
               address: ":80"
+              forwardedHeaders:
+                trustedIPs: {{ trusted_proxy_ips | to_json }}
+            traefik:
+              address: ":8080"
           providers:
             consulCatalog:
+              prefix: traefik
+              exposedByDefault: false
+              refreshInterval: 15s
+              constraints: "!Tag(`oracle`)"
               endpoint:
                 address: "127.0.0.1:8500"
+                scheme: http
       when: role == 'traefik'
+
+    # ── Cloudflare tunnel ──────────────────────────────────────────────────────
+
+    - name: Install cloudflared
+      get_url:
+        url: "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64"
+        dest: /usr/local/bin/cloudflared
+        mode: '0755'
+      when: role == 'cloudflared'
+
+    - name: Create cloudflared config directory
+      file:
+        path: /etc/cloudflared
+        state: directory
+        mode: '0750'
+      when: role == 'cloudflared'
+
+    # A remotely-managed tunnel takes its ingress from the Cloudflare dashboard
+    # and ignores this file; a locally-managed one uses it. Writing it makes the
+    # catch-all to Traefik work in both cases.
+    - name: Configure cloudflared ingress
+      copy:
+        dest: /etc/cloudflared/config.yml
+        mode: '0640'
+        content: |
+          originRequest:
+            noTLSVerify: true
+          ingress:
+            - service: {{ traefik_origin }}
+      when: role == 'cloudflared'
+
+    # Left stopped: the unit needs TUNNEL_TOKEN, which Pulumi writes to
+    # cloudflared.env out-of-band and only then starts the service.
+    - name: Setup cloudflared systemd service
+      copy:
+        dest: /etc/systemd/system/cloudflared.service
+        content: |
+          [Unit]
+          Description=Cloudflare Tunnel
+          After=network-online.target
+          Wants=network-online.target
+          [Service]
+          Type=simple
+          EnvironmentFile=/etc/cloudflared/cloudflared.env
+          ExecStart=/usr/local/bin/cloudflared --no-autoupdate --config /etc/cloudflared/config.yml tunnel run
+          Restart=always
+          RestartSec=5
+          [Install]
+          WantedBy=multi-user.target
+      when: role == 'cloudflared'
+
+    - name: Reload systemd for cloudflared
+      systemd:
+        daemon_reload: yes
+      when: role == 'cloudflared'
+
+    # ── Services ───────────────────────────────────────────────────────────────
 
     - name: Setup systemd services
       copy:
