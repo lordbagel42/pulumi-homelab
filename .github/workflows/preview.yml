@@ -94,6 +94,9 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
         env:
           PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
+          # See the matching note in deploy.yml — plugin downloads come from
+          # GitHub releases and get rate-limited without a token.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HOSTED: "true"
 
       - name: Disconnect Netbird
