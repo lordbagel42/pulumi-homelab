@@ -120,9 +120,16 @@ export class ProxmoxMachine extends pulumi.ComponentResource {
             ...(rp.extraTags ?? []),
         ];
 
-        // Register a node for the machine if it doesn't exist
+        // The node name must NOT match the machine's own Consul agent node name
+        // (which defaults to the hostname, i.e. `name`). A catalog service
+        // registered against a node that has a live agent is wiped by Consul's
+        // anti-entropy sync: the agent reconciles its own — empty — service list
+        // and deregisters everything else on that node. That is what kept
+        // silently removing the authentik service and 404-ing its route, while
+        // the consul-ui/nomad-ui registrations survived because their node names
+        // belong to no agent. Use a synthetic node name for the same reason.
         const node = new consul.Node(`${name}-node`, {
-            name: name,
+            name: `${name}-svc`,
             address: this.ip,
         }, { provider, parent: this });
 
