@@ -18,8 +18,6 @@ export interface ProxmoxMachineArgs {
     tags?: string[];
     nesting?: boolean;
     privileged?: boolean;
-    /** Overall create timeout in seconds; raise it for nodes with slow storage. */
-    timeoutCreate?: number;
 
     // Auth
     sshKeys: string[];
@@ -70,7 +68,6 @@ export class ProxmoxMachine extends pulumi.ComponentResource {
                 },
                 features: { nesting: args.nesting || false },
                 unprivileged: !args.privileged,
-                timeoutCreate: args.timeoutCreate,
                 tags: args.tags || [],
                 startOnBoot: true,
                 started: true,
@@ -99,7 +96,6 @@ export class ProxmoxMachine extends pulumi.ComponentResource {
                 },
                 cdrom: { fileId: "none" },
                 operatingSystem: { type: "l26" },
-                timeoutCreate: args.timeoutCreate,
                 tags: args.tags || [],
                 onBoot: true,
                 started: true,

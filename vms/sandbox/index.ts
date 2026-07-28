@@ -73,10 +73,6 @@ export function register(ctx: ServiceContext): void {
         disk: 40,
         nesting: true,
         privileged: true,
-        // tower's storage is slow enough that allocating the 40 GB rootfs blew
-        // through the provider's 20-minute default and failed the create while
-        // PVE was still working on it.
-        timeoutCreate: 3600,
         tags: ["sandbox", "ai"],
         sshKeys: [ctx.sshKey],
         password: ctx.vmPassword,
