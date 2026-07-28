@@ -6,7 +6,7 @@ import * as proxmox from "@muhlba91/pulumi-proxmoxve";
 import { allVms as vms, allLxcs as lxcs } from "./architecture";
 import { InfisicalConfig, readSecret } from "./infisical";
 import { discoverAndRegisterAll, ServiceContext } from "./framework";
-import { vmCloudInitData } from "./framework/node-assets";
+import { vmCloudInitData, LXC_TEMPLATE_FILE } from "./framework/node-assets";
 import type { GrafanaConfig } from "./utils/alloy";
 
 const config = new pulumi.Config();
@@ -148,7 +148,7 @@ for (const lxc of lxcs) {
             memory: { dedicated: lxc.memoryMb },
             disk: { datastoreId: "local-lvm", size: lxc.diskGb },
             operatingSystem: {
-                templateFileId: "local:vztmpl/debian-13-standard_13.1-2_amd64.tar.zst",
+                templateFileId: `local:vztmpl/${LXC_TEMPLATE_FILE}`,
                 type: "debian",
             },
             networkInterfaces: [{ name: "veth0", bridge: "vmbr0" }],

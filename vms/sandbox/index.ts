@@ -2,7 +2,7 @@ import * as path from "path";
 import * as pulumi from "@pulumi/pulumi";
 import * as command from "@pulumi/command";
 import { ProxmoxMachine } from "../../framework/proxmox-machine";
-import { nodeVmAssets } from "../../framework/node-assets";
+import { nodeLxcTemplate } from "../../framework/node-assets";
 import { ansibleProvision } from "../../utils/ansible";
 import { optionalSecret, managedSecret } from "../../infisical";
 import { ip } from "../../framework";
@@ -10,9 +10,9 @@ import type { ServiceContext } from "../../framework";
 
 // ── ServiceModule contract ─────────────────────────────────────────────────────
 //
-// Issue 9:  provision a dedicated, persistent sandbox VM in Proxmox for Poke to
+// Issue 9:  provision a dedicated, persistent sandbox in Proxmox for Poke to
 //           run code and stateful tools.
-// Issue 10: configure that VM to host persistent MCP bridge servers — Claude Code
+// Issue 10: configure it to host persistent MCP bridge servers — Claude Code
 //           and other stateful/\"dangerous\" tools — reachable over the network.
 //
 // The raw MCP bridges are protected by a better-auth gateway (API-key auth) that
@@ -31,7 +31,7 @@ export const name = "sandbox";
 export const provides = ["sandbox-setup", "sandbox-mcp"];
 export const dependencies: string[] = [];
 
-// Static VM in the 230–239 range (rule: vmId = last IP octet).
+// Static guest in the 230–239 range (rule: vmId = last IP octet).
 // 230 is reserved for nomad-client, so the sandbox takes 231.
 const SANDBOX_VMID = 231;
 const SANDBOX_IP = ip(SANDBOX_VMID);
@@ -53,29 +53,26 @@ export function register(ctx: ServiceContext): void {
     const publicUrl = config.get("SANDBOX_PUBLIC_URL") ?? `http://${SANDBOX_IP}:${GATEWAY_PORT}`;
     const adminEmail = config.get("SANDBOX_ADMIN_EMAIL") ?? "poke@sandbox.local";
 
-    // ── VM (issue 9) ────────────────────────────────────────────────────────────
-    // tower's `local` datastore is not shared with optiplex's, so the cloud image
-    // and cloud-init snippet on the ServiceContext (both optiplex-local) are
-    // invisible from here — importing them is what broke the deploy with
-    // "failed to stat '/var/lib/vz/import/debian-12-genericcloud-amd64.qcow2'".
-    // Put a node-local copy of each on tower and import those instead.
-    const assets = nodeVmAssets(SANDBOX_NODE, {
-        provider: ctx.provider,
-        sshKey: ctx.sshKey,
-        vmPassword: ctx.vmPassword,
-    });
-
-    // Roomy enough to build code and run containerised tools.
+    // ── Container (issue 9) ─────────────────────────────────────────────────────
+    // An LXC, not a VM: tower refuses to start KVM guests ("KVM virtualisation
+    // configured, but not available"), and the Proxmox provider exposes no way to
+    // turn KVM off per-VM. A container needs no hardware virtualisation at all, and
+    // nesting + privileged is the same shape dokploy already uses to run Docker.
+    //
+    // The template lives on node-local `local` storage, so tower needs its own copy
+    // — the default `local:vztmpl/...` id only resolves on optiplex.
     const machine = new ProxmoxMachine(name, {
-        type: "vm",
+        type: "lxc",
         nodeName: SANDBOX_NODE,
+        templateFileId: nodeLxcTemplate(SANDBOX_NODE, ctx.provider),
         vmId: SANDBOX_VMID,
         ip: SANDBOX_IP,
+        // Roomy enough to build code and run containerised tools.
         cpu: 4,
         memory: 12288,
         disk: 40,
-        importFrom: assets.debianCloudImageId,
-        userDataFileId: assets.cloudInitSnippetId,
+        nesting: true,
+        privileged: true,
         tags: ["sandbox", "ai"],
         sshKeys: [ctx.sshKey],
         password: ctx.vmPassword,
@@ -107,7 +104,7 @@ export function register(ctx: ServiceContext): void {
     // nor in a remote process's argv.
     // Optional, not required: readSecret aborts the whole update when a key is
     // absent, so a missing ANTHROPIC_API_KEY used to take down every unrelated
-    // resource in the stack. The VM, the gateway and the filesystem bridge all
+    // resource in the stack. The sandbox, the gateway and the filesystem bridge all
     // come up without it; only Claude Code needs it, and it can be added to
     // Infisical at /sandbox later without touching this code.
     const anthropicApiKey = optionalSecret("ANTHROPIC_API_KEY", {

@@ -1,6 +1,7 @@
 import * as pulumi from "@pulumi/pulumi";
 import * as proxmox from "@muhlba91/pulumi-proxmoxve";
 import * as consul from "@pulumi/consul";
+import { LXC_TEMPLATE_FILE } from "./node-assets";
 
 export interface ProxmoxMachineArgs {
     type: "lxc" | "vm";
@@ -10,7 +11,7 @@ export interface ProxmoxMachineArgs {
     memory?: number;
     disk?: number;
     datastoreId?: string;
-    templateFileId?: string;
+    templateFileId?: pulumi.Input<string>;
     importFrom?: pulumi.Input<string>;
     ip: string;
     gateway?: string;
@@ -53,7 +54,7 @@ export class ProxmoxMachine extends pulumi.ComponentResource {
                 memory: { dedicated: args.memory || 512 },
                 disk: { datastoreId: args.datastoreId || "local-lvm", size: args.disk || 8 },
                 operatingSystem: {
-                    templateFileId: args.templateFileId || "local:vztmpl/debian-13-standard_13.1-2_amd64.tar.zst",
+                    templateFileId: args.templateFileId ?? `local:vztmpl/${LXC_TEMPLATE_FILE}`,
                     type: "debian",
                 },
                 networkInterfaces: [{ name: "veth0", bridge: "vmbr0" }],

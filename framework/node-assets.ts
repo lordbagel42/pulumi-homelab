@@ -1,12 +1,15 @@
 import * as pulumi from "@pulumi/pulumi";
 import * as proxmox from "@muhlba91/pulumi-proxmoxve";
 
+/** The LXC template every container in the homelab is built from. */
+export const LXC_TEMPLATE_FILE = "debian-13-standard_13.1-2_amd64.tar.zst";
+
 /**
  * The cloud-init user-data every generic Debian VM in the homelab boots with.
  *
- * Shared so that per-node copies of the snippet are byte-identical: a VM that
- * moves between nodes must not also pick up a different cloud-init, and PVE
- * looks snippets up on the VM's own node.
+ * Shared so that per-node copies of the snippet stay byte-identical: PVE looks
+ * snippets up on the VM's own node, so a VM that moves nodes needs a copy there
+ * and must not pick up a different cloud-init along the way.
  */
 export function vmCloudInitData(
     sshKey: string,
@@ -41,57 +44,28 @@ runcmd:
 `;
 }
 
-export interface NodeVmAssetsArgs {
-    provider: proxmox.Provider;
-    sshKey: string;
-    vmPassword: pulumi.Input<string>;
-}
-
-export interface NodeVmAssets {
-    /** Pass to a VM disk's `importFrom`. */
-    debianCloudImageId: pulumi.Output<string>;
-    /** Pass to a VM's `initialization.userDataFileId`. */
-    cloudInitSnippetId: pulumi.Output<string>;
-}
-
 /**
- * Cloud image + cloud-init snippet on a specific node's `local` datastore.
+ * The LXC template used by every container in the homelab, on a specific node's
+ * `local` datastore.
  *
- * `local` is node-local storage, not shared across the cluster, so a VM can only
- * import a disk from — or read a snippet out of — the copy that lives on its own
- * node. The context-wide `debianCloudImageId`/`cloudInitSnippetId` are optiplex's;
- * a VM pinned to any other node needs its own pair, or PVE fails the create with
- * `failed to stat '/var/lib/vz/import/debian-12-genericcloud-amd64.qcow2'`.
+ * `local` is node-local storage, not shared across the cluster, so a container
+ * can only be created from the template that sits on its own node. optiplex's
+ * copy is placed by hand (`local:vztmpl/...`); any other node gets a managed
+ * download instead of a missing-file failure at create time.
  */
-export function nodeVmAssets(
+export function nodeLxcTemplate(
     nodeName: string,
-    { provider, sshKey, vmPassword }: NodeVmAssetsArgs,
-): NodeVmAssets {
-    const image = new proxmox.download.File(`${nodeName}-debian-cloud-image`, {
-        contentType: "import",
+    provider: proxmox.Provider,
+): pulumi.Output<string> {
+    const template = new proxmox.download.File(`${nodeName}-lxc-template`, {
+        contentType: "vztmpl",
         datastoreId: "local",
         nodeName,
-        url: "https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-genericcloud-amd64.qcow2",
-        fileName: "debian-12-genericcloud-amd64.qcow2",
-        // See the matching note in index.ts — "latest" moves, and the size check
-        // would otherwise force a replacement PVE refuses while the old file is
-        // still on disk.
+        url: `http://download.proxmox.com/images/system/${LXC_TEMPLATE_FILE}`,
+        fileName: LXC_TEMPLATE_FILE,
         overwrite: false,
         overwriteUnmanaged: true,
     }, { provider });
 
-    const snippet = new proxmox.FileLegacy(`${nodeName}-vm-cloud-init`, {
-        contentType: "snippets",
-        datastoreId: "local",
-        nodeName,
-        sourceRaw: {
-            fileName: "vm-cloud-init.yaml",
-            data: vmCloudInitData(sshKey, vmPassword),
-        },
-    }, { provider });
-
-    return {
-        debianCloudImageId: image.id,
-        cloudInitSnippetId: snippet.id,
-    };
+    return template.id;
 }
