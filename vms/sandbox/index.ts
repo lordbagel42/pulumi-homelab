@@ -53,6 +53,7 @@ export function register(ctx: ServiceContext): void {
     // Roomy enough to build code and run containerised tools.
     const machine = new ProxmoxMachine(name, {
         type: "vm",
+        nodeName: "tower",
         vmId: SANDBOX_VMID,
         ip: SANDBOX_IP,
         cpu: 4,
