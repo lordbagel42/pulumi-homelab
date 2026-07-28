@@ -24,7 +24,14 @@ import { testingVms } from "./vms/testing";
 export const NETWORK_GATEWAY = "192.168.0.1";
 
 /** Static /24 address for any resource where vmId = last octet (range 201–254). */
-export const staticIp = (vmId: number): string => `192.168.0.${vmId}`;
+export const staticIp = (vmId: number): string {
+    if (vmId >= 240 && vmId <= 255) {
+        throw new Error(
+            "VM IDs 240‑255 are reserved and cannot be auto‑assigned IP. Provide explicit IP.",
+        );
+    }
+    return `192.168.0.${vmId}`;
+};
 
 export const allLxcs: LXCDefinition[] = [];
 export const allVms = [...testingVms];
