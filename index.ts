@@ -6,6 +6,7 @@ import * as proxmox from "@muhlba91/pulumi-proxmoxve";
 import { allVms as vms, allLxcs as lxcs } from "./architecture";
 import { InfisicalConfig, readSecret } from "./infisical";
 import { discoverAndRegisterAll, ServiceContext } from "./framework";
+import { vmCloudInitData } from "./framework/node-assets";
 import type { GrafanaConfig } from "./utils/alloy";
 
 const config = new pulumi.Config();
@@ -72,33 +73,7 @@ const vmCloudInitSnippet = new proxmox.FileLegacy(
         nodeName: "optiplex",
         sourceRaw: {
             fileName: "vm-cloud-init.yaml",
-            data: pulumi.interpolate`#cloud-config
-users:
-  - name: sylvie
-    shell: /bin/bash
-    sudo: ALL=(ALL) NOPASSWD:ALL
-    lock_passwd: false
-    ssh_authorized_keys:
-      - ${sshKey}
-  - name: root
-    ssh_authorized_keys:
-      - ${sshKey}
-chpasswd:
-  users:
-    - name: sylvie
-      password: ${vmPassword}
-      type: text
-  expire: false
-packages:
-  - qemu-guest-agent
-runcmd:
-  - systemctl enable --now qemu-guest-agent
-  - sed -i '/PermitRootLogin/d' /etc/ssh/sshd_config
-  - echo 'PermitRootLogin prohibit-password' >> /etc/ssh/sshd_config
-  - sed -i '/^#\?UseDNS/d' /etc/ssh/sshd_config
-  - echo 'UseDNS no' >> /etc/ssh/sshd_config
-  - systemctl restart sshd
-`,
+            data: vmCloudInitData(sshKey, vmPassword),
         },
     },
     { provider },

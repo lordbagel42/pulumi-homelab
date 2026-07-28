@@ -2,6 +2,7 @@ import * as path from "path";
 import * as pulumi from "@pulumi/pulumi";
 import * as command from "@pulumi/command";
 import { ProxmoxMachine } from "../../framework/proxmox-machine";
+import { nodeVmAssets } from "../../framework/node-assets";
 import { ansibleProvision } from "../../utils/ansible";
 import { optionalSecret, managedSecret } from "../../infisical";
 import { ip } from "../../framework";
@@ -35,6 +36,9 @@ export const dependencies: string[] = [];
 const SANDBOX_VMID = 231;
 const SANDBOX_IP = ip(SANDBOX_VMID);
 
+// Hosted on tower rather than the default optiplex — it has the headroom.
+const SANDBOX_NODE = "tower";
+
 // Only the gateway is exposed; the bridges listen on internal, firewalled ports.
 const GATEWAY_PORT = 8080;
 
@@ -50,17 +54,28 @@ export function register(ctx: ServiceContext): void {
     const adminEmail = config.get("SANDBOX_ADMIN_EMAIL") ?? "poke@sandbox.local";
 
     // ── VM (issue 9) ────────────────────────────────────────────────────────────
+    // tower's `local` datastore is not shared with optiplex's, so the cloud image
+    // and cloud-init snippet on the ServiceContext (both optiplex-local) are
+    // invisible from here — importing them is what broke the deploy with
+    // "failed to stat '/var/lib/vz/import/debian-12-genericcloud-amd64.qcow2'".
+    // Put a node-local copy of each on tower and import those instead.
+    const assets = nodeVmAssets(SANDBOX_NODE, {
+        provider: ctx.provider,
+        sshKey: ctx.sshKey,
+        vmPassword: ctx.vmPassword,
+    });
+
     // Roomy enough to build code and run containerised tools.
     const machine = new ProxmoxMachine(name, {
         type: "vm",
-        nodeName: "tower",
+        nodeName: SANDBOX_NODE,
         vmId: SANDBOX_VMID,
         ip: SANDBOX_IP,
         cpu: 4,
         memory: 12288,
         disk: 40,
-        importFrom: ctx.debianCloudImageId,
-        userDataFileId: ctx.cloudInitSnippetId,
+        importFrom: assets.debianCloudImageId,
+        userDataFileId: assets.cloudInitSnippetId,
         tags: ["sandbox", "ai"],
         sshKeys: [ctx.sshKey],
         password: ctx.vmPassword,
