@@ -6,6 +6,7 @@ import * as proxmox from "@muhlba91/pulumi-proxmoxve";
 import { allVms as vms, allLxcs as lxcs } from "./architecture";
 import { InfisicalConfig, readSecret } from "./infisical";
 import { discoverAndRegisterAll, ServiceContext } from "./framework";
+import { GARAGE_ENDPOINT, JUICEFS_BUCKET, GARAGE_REGION } from "./lxcs/garage";
 import { vmCloudInitData, LXC_TEMPLATE_FILE } from "./framework/node-assets";
 import type { GrafanaConfig } from "./utils/alloy";
 
@@ -201,3 +202,19 @@ discoverAndRegisterAll(ctx, [
     path.join(__dirname, "vms"),
     path.join(__dirname, "nomad"),
 ]);
+
+// ── Garage / JuiceFS wiring ──────────────────────────────────────────────────
+// Exported so the mrow cluster's JuiceFS component can be configured without
+// anyone reading these back out of the Proxmox console. The region is here
+// because it is not guessable: it has to match `s3_region` in garage.toml
+// exactly or every signed request fails validation.
+//
+// The credentials are deliberately NOT exported. They live in Infisical
+// (`garage-juicefs-access-key` / `garage-juicefs-secret-key`) and are sealed
+// into mrow-gitops from there — the same shape every other cross-repo
+// credential uses. Adding them here would put a live storage credential in
+// `pulumi stack output` and in this stack's state for the convenience of one
+// copy-paste.
+export const garageS3Endpoint = GARAGE_ENDPOINT;
+export const garageJuicefsBucket = JUICEFS_BUCKET;
+export const garageS3Region = GARAGE_REGION;
