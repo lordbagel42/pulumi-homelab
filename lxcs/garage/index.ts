@@ -94,12 +94,24 @@ const GARAGE_ADMIN_PORT = 3903;
 export const GARAGE_ENDPOINT = `http://${GARAGE_IP}:${GARAGE_S3_PORT}`;
 
 /**
- * The S3 region Garage reports. Garage is not regional, but the AWS SDK — and
- * therefore JuiceFS — insists on a region for request signing, and it has to
- * match on both sides or every request fails signature validation. "garage" is
- * the project's own default; the mrow-gitops Secret must say the same.
+ * The S3 region Garage reports.
+ *
+ * `us-east-1`, and NOT Garage's own default of "garage". Garage is not regional
+ * — the string is meaningless to it — but SigV4 signs the region into every
+ * request, and the server rejects a signature computed over a different one.
+ *
+ * The value is forced by the client, not chosen here. JuiceFS defaults to
+ * `us-east-1` and exposes no per-StorageClass region parameter; the only
+ * override is the `AWS_REGION` environment variable on the mount process, which
+ * under `mountMode: process` is one shared process per node serving BOTH
+ * filesystems. Setting it there to satisfy this tier would change the region the
+ * R2-backed tier signs with too.
+ *
+ * So the server moves instead of the client. Leaving this as "garage" produces a
+ * mount that fails with a signature error naming a region and nothing else,
+ * which is a genuinely hard thing to work backwards from.
  */
-export const GARAGE_REGION = "garage";
+export const GARAGE_REGION = "us-east-1";
 
 /**
  * The bucket JuiceFS writes into. Named to match the R2 bucket it mirrors in

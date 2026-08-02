@@ -8,7 +8,10 @@
     s3_port: 3900
     rpc_port: 3901
     admin_port: 3903
-    s3_region: "garage"
+    # Not Garage's own default of "garage" — see GARAGE_REGION in index.ts.
+    # JuiceFS signs with us-east-1 and cannot be told otherwise per-filesystem,
+    # so the server matches the client rather than the other way round.
+    s3_region: "us-east-1"
     juicefs_bucket: "mrow-juicefs-homelab"
     capacity_gb: 85
   tasks:
@@ -195,9 +198,10 @@
           # off-subnet, so loopback-only would make this useless to its only
           # consumer.
           api_bind_addr = "[::]:{{ s3_port }}"
-          # Must match what the client signs with. JuiceFS's Secret in
-          # mrow-gitops has to say the same, or every request fails signature
-          # validation with an error that names the region and nothing else.
+          # Must match what the client signs with. JuiceFS defaults to
+          # us-east-1 and has no per-filesystem region setting, so this follows
+          # it — see GARAGE_REGION in index.ts. A mismatch fails every request
+          # with a signature error that names the region and nothing else.
           s3_region = "{{ s3_region }}"
 
           [admin]
