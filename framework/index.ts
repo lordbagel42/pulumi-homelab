@@ -3,6 +3,10 @@ import * as path from "path";
 import * as jsyaml from "js-yaml";
 import * as pulumi from "@pulumi/pulumi";
 import { ProxmoxMachine } from "./proxmox-machine";
+// Re-exported from proxmox-machine.ts rather than declared here: index.ts
+// already imports from that module, so declaring it here would make the two
+// mutually dependent and could leave LAN_PREFIX undefined at module init.
+export { LAN_PREFIX } from "./proxmox-machine";
 import { lxcPassword } from "../infisical";
 import { InfisicalConfig } from "../infisical";
 import { GrafanaConfig } from "../utils/alloy";

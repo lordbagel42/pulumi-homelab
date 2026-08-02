@@ -40,6 +40,13 @@
         state: directory
       when: role in ['consul', 'nomad', 'traefik', 'nomad-client']
 
+    # The `peering`, `connect` and `ports.grpc_tls` stanzas below are all at
+    # Consul's own defaults for a server (peering on, connect on, gRPC-TLS
+    # listening on 8503). They are written out anyway, because this file is the
+    # acceptor side of a cluster peering link with mrow and "it works by default"
+    # is not something to leave implicit in the one config that has to keep
+    # working across upgrades. A future release flipping a default would break
+    # peering with nothing in git to point at.
     - name: Configure Consul Server
       copy:
         dest: /etc/consul.d/consul.hcl
@@ -51,6 +58,36 @@
           ui_config { enabled = true }
           client_addr = "0.0.0.0"
           bind_addr   = "{{ ansible_default_ipv4.address }}"
+
+          # Cluster peering with the mrow Kubernetes cluster. mrow dials, this
+          # side accepts — the acceptor has to be reachable when the handshake
+          # runs, and this is the always-on side.
+          #
+          # The token is minted by the Pulumi mrow-infra stack in talos-things
+          # (consul.PeeringToken against this address) and delivered into mrow as
+          # the Secret `peering-token-homelab`, which its PeeringDialer redeems.
+          peering {
+            enabled = true
+          }
+
+          # Peering runs over the gRPC TLS port and nothing else. client_addr
+          # above is 0.0.0.0, so this listens on the LAN address as well as
+          # loopback — which is required, since mrow connects to
+          # {{ ansible_default_ipv4.address }}:8503 from off-subnet.
+          #
+          # Note the plain gRPC port (8502) stays disabled. Peering does not use
+          # it and it would be unauthenticated and unencrypted on 0.0.0.0.
+          ports {
+            grpc_tls = 8503
+          }
+
+          # Peering builds its mTLS material from the Connect CA, so Connect has
+          # to be initialised even though no service mesh runs here — nothing in
+          # this datacenter has a sidecar. Enabling it costs a CA and a few
+          # goroutines, and without it the peering token has no roots to carry.
+          connect {
+            enabled = true
+          }
       when: role == 'consul'
 
     # The datacenter must match the server's — Consul's LAN gossip pool refuses
@@ -399,6 +436,31 @@
           delay: 2
           when: role == 'consul'
 
+        # Peering happens over 8503 and nowhere else, so "Consul is up" is not
+        # the same as "Consul can be peered with". This is the check whose
+        # absence let the peering failure look like a mrow-side problem for
+        # weeks: the HTTP API on 8500 answered fine the whole time.
+        - name: Wait for the Consul gRPC-TLS port to listen
+          wait_for:
+            host: 127.0.0.1
+            port: 8503
+            timeout: 60
+          when: role == 'consul'
+
+        # Confirm it is bound on the LAN address too, not just loopback. A
+        # `client_addr` that ends up as 127.0.0.1 produces a Consul that peers
+        # perfectly from the box itself and is unreachable from mrow.
+        - name: Verify 8503 is bound on the LAN address, not only loopback
+          shell: |
+            ss -lnt 2>/dev/null | awk '$4 ~ /:8503$/ {print $4}'
+          register: grpc_bind
+          changed_when: false
+          failed_when: >
+            grpc_bind.stdout is not search('0\.0\.0\.0:8503')
+            and grpc_bind.stdout is not search('\*:8503')
+            and grpc_bind.stdout is not search(ansible_default_ipv4.address + ':8503')
+          when: role == 'consul'
+
         - name: Wait for the Nomad agent to listen
           wait_for:
             host: 127.0.0.1
@@ -480,6 +542,64 @@
             msg: |
               An agent did not come up on {{ inventory_hostname }} (role={{ role }}).
               {{ agent_journals.stdout | default('no journal output') }}
+
+    # ── Return path to the mrow cluster ────────────────────────────────────────
+    # The one check that would have found the Consul peering failure directly.
+    #
+    # This LAN is a single flat L2 carrying three /24s: this homelab on
+    # 192.168.0.x, mrow's Talos nodes on 192.168.10.x, and mrow's Cilium service
+    # addresses on 192.168.11-12.x. mrow's nodes use a /16, so they ARP for
+    # 192.168.0.201 directly and the request arrives.
+    #
+    # The reply is the problem. With a /24 here, 192.168.10.11 is off-subnet, so
+    # the reply goes to the default gateway — and the Eero has no route for
+    # 192.168.10.0/24, so it drops it. Every port appears filtered from mrow while
+    # working perfectly from any host inside 192.168.0.0/24.
+    #
+    # framework.LAN_PREFIX now configures /16, which makes those ranges on-link.
+    # But Proxmox only writes the address into the guest at creation, so an
+    # already-running container keeps its old /24 until it is restarted.
+    #
+    # Non-fatal on purpose: this is a real problem that does NOT mean the deploy
+    # failed, and failing here would block an otherwise-good run on a condition
+    # whose fix is "restart the container".
+    - name: Check the netmask covers mrow's subnets
+      shell: |
+        set -o pipefail
+        ip -4 -o addr show scope global | awk '{print $2, $4}'
+      args:
+        executable: /bin/bash
+      register: lan_prefix_check
+      changed_when: false
+      failed_when: false
+      when: role in ['consul', 'nomad', 'traefik', 'nomad-client']
+
+    - name: Warn if the netmask still cannot reach mrow
+      debug:
+        msg: |
+          ────────────────────────────────────────────────────────────────────
+          NETMASK TOO NARROW on {{ inventory_hostname }} — mrow cannot be
+          replied to.
+
+          Interfaces: {{ lan_prefix_check.stdout_lines | default([]) | join(', ') }}
+
+          A /24 here means replies to mrow's 192.168.10.x nodes are handed to
+          192.168.0.1, which has no route for that subnet and drops them.
+          Consul cluster peering cannot establish in this state, and neither
+          can anything else mrow initiates against this host.
+
+          Fix: framework.LAN_PREFIX already sets /16 for newly-applied config.
+          Restart this guest so it re-reads its network configuration:
+              qm reboot {{ vmid | default('<vmid>') }}      # VM
+              pct reboot {{ vmid | default('<vmid>') }}     # LXC
+          Then re-run and confirm this warning is gone.
+          ────────────────────────────────────────────────────────────────────
+      when:
+        - role in ['consul', 'nomad', 'traefik', 'nomad-client']
+        - lan_prefix_check.stdout is defined
+        # /16 or wider is fine; /17..../32 is not. Matching on "/16 " is enough
+        # here because nothing in this plan would legitimately use /8-/15.
+        - lan_prefix_check.stdout is not search('/16')
 
     # Bridge-mode allocations run, but their mapped host ports refuse
     # connections, so Consul marks them critical and Traefik drops the route:
