@@ -15,9 +15,14 @@
     juicefs_bucket: "mrow-juicefs-homelab"
     capacity_gb: 85
   tasks:
+    # unzip is for CONSUL, not Garage. Garage ships a bare static binary that
+    # get_url drops straight into place, which is exactly why this was dropped
+    # when the playbook was adapted from the MinIO one — and it broke the first
+    # deploy, because the Consul agent below is still distributed as a zip and
+    # Ansible's unarchive has no fallback for that format.
     - name: Install dependencies
       apt:
-        name: [wget, curl, ca-certificates]
+        name: [wget, unzip, curl, ca-certificates]
         state: present
         update_cache: yes
 
