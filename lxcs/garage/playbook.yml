@@ -1,0 +1,414 @@
+- name: Setup Garage
+  hosts: all
+  become: yes
+  vars:
+    consul_version: "1.20.1"
+    datacenter: "homelab"
+    garage_version: "v2.3.0"
+    s3_port: 3900
+    rpc_port: 3901
+    admin_port: 3903
+    s3_region: "garage"
+    juicefs_bucket: "mrow-juicefs-homelab"
+    capacity_gb: 85
+  tasks:
+    - name: Install dependencies
+      apt:
+        name: [wget, curl, ca-certificates]
+        state: present
+        update_cache: yes
+
+    # ── Consul agent ──────────────────────────────────────────────────────────
+    # Same shape as every other homelab guest: a client agent joining the
+    # homelab datacenter, so this host and its services appear in the catalog.
+    - name: Install Consul
+      block:
+        - name: Download Consul
+          get_url:
+            url: "https://releases.hashicorp.com/consul/{{ consul_version }}/consul_{{ consul_version }}_linux_amd64.zip"
+            dest: /tmp/consul.zip
+        - name: Unzip Consul
+          unarchive:
+            src: /tmp/consul.zip
+            dest: /usr/local/bin
+            remote_src: yes
+            mode: '0755'
+
+    - name: Create Consul config directory
+      file:
+        path: /etc/consul.d
+        state: directory
+
+    # The datacenter must match the server's — Consul's LAN gossip pool refuses
+    # to join across datacenters, and the default would be "dc1".
+    - name: Configure Consul
+      copy:
+        dest: /etc/consul.d/consul.hcl
+        content: |
+          datacenter = "{{ datacenter }}"
+          data_dir   = "/var/lib/consul"
+          retry_join = ["{{ consul_ip }}"]
+          bind_addr  = "{{ ansible_default_ipv4.address }}"
+
+    - name: Install Consul service
+      copy:
+        dest: /etc/systemd/system/consul.service
+        content: |
+          [Unit]
+          Description=Consul Agent
+          After=network-online.target
+          Wants=network-online.target
+          [Service]
+          ExecStart=/usr/local/bin/consul agent -config-dir=/etc/consul.d/
+          Restart=always
+          RestartSec=5
+          [Install]
+          WantedBy=multi-user.target
+
+    - name: Start Consul
+      systemd:
+        name: consul
+        state: restarted
+        enabled: yes
+        daemon_reload: yes
+
+    # ── Garage ────────────────────────────────────────────────────────────────
+    # The musl build, which is the one the project publishes as its portable
+    # static binary — no glibc version to match against the container's base
+    # image, which is what makes this work unchanged across template updates.
+    - name: Download Garage
+      get_url:
+        url: "https://garagehq.deuxfleurs.fr/_releases/{{ garage_version }}/x86_64-unknown-linux-musl/garage"
+        dest: "/usr/local/bin/garage-{{ garage_version }}"
+        mode: '0755'
+        force: no
+
+    # Symlinked rather than downloaded straight to /usr/local/bin/garage, so the
+    # version actually running is visible in `ls -l` and a downgrade is a symlink
+    # swap instead of a re-download.
+    - name: Link the pinned Garage binary
+      file:
+        src: "/usr/local/bin/garage-{{ garage_version }}"
+        dest: /usr/local/bin/garage
+        state: link
+        force: yes
+
+    # A dedicated system user rather than root. Garage needs no privilege beyond
+    # its own data directory and three ports above 1024.
+    #
+    # Not DynamicUser, which the upstream systemd example uses: the data must
+    # outlive the unit and be readable by a bootstrap script running as root,
+    # and a dynamically-allocated uid makes both awkward for no gain here.
+    - name: Create garage system user
+      user:
+        name: garage
+        system: yes
+        shell: /usr/sbin/nologin
+        home: /var/lib/garage
+        create_home: no
+
+    # Metadata and data are separated because they want different things:
+    # metadata is small, hot, and fsynced; data is large, cold, and appended.
+    # Splitting them now means moving metadata to faster storage later is a
+    # config change rather than a migration.
+    - name: Create Garage data directories
+      file:
+        path: "{{ item }}"
+        state: directory
+        owner: garage
+        group: garage
+        # 0750: these hold every object, in the clear.
+        mode: '0750'
+      loop:
+        - /var/lib/garage
+        - /var/lib/garage/meta
+        - /var/lib/garage/data
+        - /var/lib/garage/snapshots
+
+    - name: Create Garage config directory
+      file:
+        path: /etc/garage
+        state: directory
+        owner: root
+        group: garage
+        mode: '0750'
+
+    # ── garage.toml ───────────────────────────────────────────────────────────
+    # NON-SECRET CONFIG ONLY. rpc_secret and admin_token are deliberately absent:
+    # Pulumi writes them into /etc/garage/garage.env as GARAGE_RPC_SECRET and
+    # GARAGE_ADMIN_TOKEN, which Garage reads natively.
+    #
+    # That split is not fastidiousness. Garage refuses to start if a config file
+    # containing secrets is world-readable (allow_world_readable_secrets defaults
+    # to false), and keeping secrets out of the file entirely means this playbook
+    # never has to handle them — so no credential is ever an Ansible variable, a
+    # fact, or a line in a --diff run's output.
+    - name: Configure Garage
+      copy:
+        dest: /etc/garage.toml
+        owner: root
+        group: garage
+        mode: '0640'
+        content: |
+          # MANAGED BY ANSIBLE (lxcs/garage/playbook.yml). Edits will be
+          # overwritten on the next provision.
+          #
+          # Secrets are NOT here — see GARAGE_RPC_SECRET / GARAGE_ADMIN_TOKEN in
+          # /etc/garage/garage.env, written by Pulumi.
+
+          # Single node, single disk. No replication and no erasure coding: this
+          # is the expendable tier behind JuiceFS and R2 holds the durable copy.
+          # See lxcs/garage/index.ts for the full argument.
+          replication_factor = 1
+
+          metadata_dir = "/var/lib/garage/meta"
+          data_dir = "/var/lib/garage/data"
+          metadata_snapshots_dir = "/var/lib/garage/snapshots"
+
+          # LMDB is the project's recommended engine and the default. sqlite is
+          # the alternative and is markedly slower for the small-object churn
+          # JuiceFS produces.
+          db_engine = "lmdb"
+
+          # fsync metadata, do not fsync data. With replication_factor = 1 there
+          # is no second copy to reconstruct from, so a metadata write that is
+          # acknowledged and then lost to a power cut leaves objects that exist
+          # on disk but cannot be found. Data blocks are content-addressed and a
+          # torn one is detected by checksum, so the asymmetry is deliberate
+          # rather than an oversight.
+          metadata_fsync = true
+          data_fsync = false
+
+          # Hourly consistency scrub of stored blocks against their checksums.
+          # On a single-replica node this cannot repair anything — but it turns
+          # silent bit rot into a log line, which is the difference between
+          # noticing a dying disk and finding out when JuiceFS returns garbage.
+          disable_scrub = false
+
+          metadata_auto_snapshot_interval = "6h"
+
+          rpc_bind_addr = "[::]:{{ rpc_port }}"
+          rpc_public_addr = "{{ ansible_default_ipv4.address }}:{{ rpc_port }}"
+
+          [s3_api]
+          # All interfaces: JuiceFS on the mrow cluster connects from
+          # off-subnet, so loopback-only would make this useless to its only
+          # consumer.
+          api_bind_addr = "[::]:{{ s3_port }}"
+          # Must match what the client signs with. JuiceFS's Secret in
+          # mrow-gitops has to say the same, or every request fails signature
+          # validation with an error that names the region and nothing else.
+          s3_region = "{{ s3_region }}"
+
+          [admin]
+          # Reachable on the LAN so Consul can probe /health, which is
+          # unauthenticated. Everything else on this port requires the bearer
+          # token in GARAGE_ADMIN_TOKEN.
+          api_bind_addr = "[::]:{{ admin_port }}"
+
+    # Left stopped: Pulumi writes garage.env out-of-band and only then enables
+    # the unit. Starting it here would boot a Garage with no rpc_secret, which
+    # fails — noisily, but for a reason that has nothing to do with what is
+    # actually wrong.
+    - name: Install Garage systemd unit
+      copy:
+        dest: /etc/systemd/system/garage.service
+        content: |
+          [Unit]
+          Description=Garage S3 object storage
+          After=network-online.target
+          Wants=network-online.target
+          # Refuse to start rather than start unconfigured. Without this, a
+          # missing env file means Garage exits on a missing rpc_secret and
+          # systemd restarts it forever.
+          AssertFileNotEmpty=/etc/garage/garage.env
+
+          [Service]
+          Type=simple
+          User=garage
+          Group=garage
+          EnvironmentFile=/etc/garage/garage.env
+          ExecStart=/usr/local/bin/garage -c /etc/garage.toml server
+          Restart=always
+          RestartSec=5
+          # Garage keeps an LMDB map and many block files open at once.
+          LimitNOFILE=65536
+          # Prefer killing something else: this is the storage layer under a
+          # filesystem mounted on another cluster, and its death is not local.
+          OOMScoreAdjust=-500
+          # Hardening. Garage needs nothing outside its data directory.
+          NoNewPrivileges=yes
+          PrivateTmp=yes
+          ProtectSystem=strict
+          ProtectHome=yes
+          ReadWritePaths=/var/lib/garage
+
+          [Install]
+          WantedBy=multi-user.target
+
+    # ── Bootstrap script ──────────────────────────────────────────────────────
+    # Holds the layout, bucket and key logic so that Pulumi's SSH command stays
+    # a one-liner. Reads its inputs from the two env files Pulumi writes, so no
+    # credential is ever an argument and nothing needs shell escaping through
+    # four layers of quoting.
+    - name: Install the Garage bootstrap script
+      copy:
+        dest: /usr/local/bin/garage-bootstrap.sh
+        mode: '0750'
+        content: |
+          #!/bin/bash
+          #
+          # Idempotent. Assigns the cluster layout on first run, creates the
+          # JuiceFS bucket, and imports (or rotates) a bucket-scoped key. Safe to
+          # re-run; Pulumi does exactly that on any credential rotation.
+          set -euo pipefail
+
+          die() { echo "garage-bootstrap: $*" >&2; exit 1; }
+
+          [ -r /etc/garage/garage.env ]  || die "/etc/garage/garage.env missing"
+          [ -r /etc/garage/juicefs.env ] || die "/etc/garage/juicefs.env missing"
+          # The CLI talks to the daemon over RPC and needs the same secret the
+          # server has. Sourcing rather than re-reading garage.toml, since the
+          # secret is deliberately not in there.
+          # shellcheck disable=SC1091
+          . /etc/garage/garage.env
+          . /etc/garage/juicefs.env
+          export GARAGE_RPC_SECRET GARAGE_ADMIN_TOKEN
+
+          : "${GARAGE_RPC_SECRET:?}" "${GARAGE_ADMIN_TOKEN:?}"
+          : "${JFS_ACCESS_KEY:?}" "${JFS_SECRET_KEY:?}"
+
+          # A function rather than a `G=...` variable, so the arguments are
+          # passed as a proper array and nothing depends on word splitting.
+          g() { garage -c /etc/garage.toml "$@"; }
+
+          # Wait for the daemon's RPC to answer. Note this is NOT /health:
+          # /health returns 503 until the node has a layout, so before the first
+          # `layout apply` below it can never pass, and waiting on it here would
+          # deadlock the bootstrap on its own first run.
+          for i in $(seq 1 30); do
+            g status >/dev/null 2>&1 && break
+            [ "$i" = 30 ] && die "Garage RPC did not become reachable"
+            sleep 2
+          done
+
+          # ── Layout ──────────────────────────────────────────────────────────
+          # Mandatory, and the step with no MinIO equivalent: a Garage node
+          # stores nothing until it has been assigned a role in the cluster
+          # layout. It has to be skipped on re-runs, because `layout apply
+          # --version` must be given exactly one more than the current version
+          # and fails otherwise.
+          #
+          # The check reads the layout version from the admin API rather than
+          # grepping `garage layout show`. That output is a human-facing table
+          # which also lists connected nodes that have NO role — so matching on
+          # the node id in it would report "already assigned" on the very first
+          # run and skip the one step that matters. The API returns
+          # {"version":N,...} where N is 0 until the first apply.
+          layout_version=$(
+            curl -fsS -H "Authorization: Bearer $GARAGE_ADMIN_TOKEN" \
+              "http://127.0.0.1:{{ admin_port }}/v2/GetClusterLayout" \
+              | grep -o '"version":[0-9]*' | head -1 | cut -d: -f2
+          ) || die "could not read cluster layout from the admin API"
+
+          if [ "${layout_version:-0}" -gt 0 ]; then
+            echo "garage-bootstrap: layout already applied (version $layout_version)"
+          else
+            # `node id -q` prints `<hex node id>@<addr>:<port>`.
+            node_id=$(g node id -q 2>/dev/null | cut -d@ -f1)
+            [ -n "$node_id" ] || die "could not read node id"
+
+            g layout assign -z {{ datacenter }} -c {{ capacity_gb }}G "$node_id"
+            # Version 1 is correct only for the very first apply, which is the
+            # only case this branch runs in.
+            g layout apply --version 1
+            echo "garage-bootstrap: layout assigned"
+
+            # Only now can /health pass. Before the layout existed the node had
+            # nowhere to place data and reported 503.
+            for i in $(seq 1 30); do
+              curl -fsS -o /dev/null "http://127.0.0.1:{{ admin_port }}/health" && break
+              [ "$i" = 30 ] && die "Garage did not become healthy after layout apply"
+              sleep 2
+            done
+          fi
+
+          # ── Bucket ──────────────────────────────────────────────────────────
+          # `bucket create` errors when the bucket exists, so check first rather
+          # than swallowing the failure — a blanket `|| true` here would also
+          # hide a genuine error.
+          if g bucket info "{{ juicefs_bucket }}" >/dev/null 2>&1; then
+            echo "garage-bootstrap: bucket {{ juicefs_bucket }} exists"
+          else
+            g bucket create "{{ juicefs_bucket }}"
+            echo "garage-bootstrap: created bucket {{ juicefs_bucket }}"
+          fi
+
+          # ── Key ─────────────────────────────────────────────────────────────
+          # Garage has no way to change an existing key's secret — `key set`
+          # only touches expiry — so a rotation is delete-then-import. That is a
+          # brief window where JuiceFS gets a 403, which is the honest cost of
+          # rotating a credential and is why this only runs when the secret has
+          # actually changed (Pulumi's triggers).
+          #
+          # Deleting the key also drops its bucket permissions, which is why the
+          # `bucket allow` below is unconditional rather than paired with the
+          # import.
+          if g key info "$JFS_ACCESS_KEY" >/dev/null 2>&1; then
+            g key delete "$JFS_ACCESS_KEY" --yes
+            echo "garage-bootstrap: rotating existing key"
+          fi
+          g key import "$JFS_ACCESS_KEY" "$JFS_SECRET_KEY" -n juicefs --yes
+
+          # Scoped to the one bucket, so a key leaked from the Kubernetes Secret
+          # that holds it cannot enumerate or delete anything else here.
+          #
+          # --read --write and NOT --owner: owner permits deleting the bucket
+          # and changing its website config, neither of which JuiceFS does.
+          $G bucket allow "{{ juicefs_bucket }}" --read --write --key "$JFS_ACCESS_KEY"
+
+          echo "garage-bootstrap: bucket {{ juicefs_bucket }} ready"
+
+    - name: Reload systemd
+      systemd:
+        daemon_reload: yes
+
+    # ── Return path to the mrow cluster ───────────────────────────────────────
+    # JuiceFS pods on mrow connect from 192.168.10.x. If this container still has
+    # a /24, the TCP handshake never completes: the SYN arrives over the shared
+    # L2 and the SYN-ACK is handed to the Eero, which has no route for that
+    # subnet. Same failure that kept Consul peering down — see
+    # framework/proxmox-machine.ts.
+    #
+    # Non-fatal, because the fix is "restart the container" and failing here
+    # would block an otherwise-good deploy.
+    - name: Check the netmask covers mrow's subnets
+      shell: |
+        set -o pipefail
+        ip -4 -o addr show scope global | awk '{print $2, $4}'
+      args:
+        executable: /bin/bash
+      register: garage_prefix_check
+      changed_when: false
+      failed_when: false
+
+    - name: Warn if mrow cannot reach this host
+      debug:
+        msg: |
+          ────────────────────────────────────────────────────────────────────
+          NETMASK TOO NARROW — JuiceFS on mrow will not be able to reach this
+          Garage.
+
+          Interfaces: {{ garage_prefix_check.stdout_lines | default([]) | join(', ') }}
+
+          A /24 here means the SYN-ACK to mrow's 192.168.10.x nodes goes to
+          192.168.0.1, which has no route for that subnet and drops it. The
+          mount will fail with a timeout that looks like Garage is down.
+
+          Fix: restart this container so it re-reads its network config
+          (framework.LAN_PREFIX already sets /16 for newly-applied config):
+              pct reboot 212
+          ────────────────────────────────────────────────────────────────────
+      when:
+        - garage_prefix_check.stdout is defined
+        - garage_prefix_check.stdout is not search('/16')
