@@ -2,10 +2,7 @@ job "lookout-updater" {
   datacenters = ["homelab"]
   type        = "batch"
 
-  periodic {
-    crons            = ["0 6 * * *"]
-    prohibit_overlap = true
-  }
+  # Periodic scheduling disabled; retain the job definition for manual runs.
 
   group "update" {
     count = 1
