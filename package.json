@@ -9,6 +9,7 @@
     "dependencies": {
         "@infisical/sdk": "^5.0.2",
         "@muhlba91/pulumi-proxmoxve": "^8.1.0",
+        "@pulumi/cloudflare": "^6.19.0",
         "@pulumi/command": "^1.0.0",
         "@pulumi/consul": "^3.14.1",
         "@pulumi/nomad": "^2.6.1",

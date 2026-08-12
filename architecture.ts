@@ -8,6 +8,7 @@
 //   .1         gateway
 //   .2–10      physical hardware (manually assigned)
 //   .11–200    DHCP pool
+//   .200       home-assistant (not managed here; needs a DHCP reservation)
 //   .100       proxmox-backup-server (static, vmId 100)
 //   .201–210   system lxc   — vmId matches last octet  (consul: 201, nomad: 202, traefik: 203, cloudflared: 204)
 //   .211–229   app lxc      — vmId matches last octet  (dokploy: 211, garage: 212,

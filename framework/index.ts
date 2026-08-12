@@ -13,6 +13,7 @@ import { GrafanaConfig } from "../utils/alloy";
 import * as proxmox from "@muhlba91/pulumi-proxmoxve";
 import * as consul from "@pulumi/consul";
 import * as nomad from "@pulumi/nomad";
+import * as cloudflare from "@pulumi/cloudflare";
 
 export const GATEWAY = "192.168.0.1";
 
@@ -55,6 +56,12 @@ export interface ServiceContext {
      * module once the Nomad server is provisioned.
      */
     nomadProvider?: nomad.Provider;
+    /**
+     * Cloudflare provider, authenticated with the API token from Infisical.
+     * Modules that own a hostname use it with `tunnelHostname()` to declare
+     * their DNS record instead of it being added by hand in the dashboard.
+     */
+    cloudflareProvider?: cloudflare.Provider;
 }
 
 export interface ServiceModule {

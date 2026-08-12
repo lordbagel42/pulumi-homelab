@@ -39,29 +39,72 @@ there is no inbound port forward anywhere.
    So a homelab service needs no special tag; an Oracle-hosted one must include
    `"oracle"` in its service tags.
 
-3. **Point the hostname at the tunnel.** This is the one step Pulumi does not
-   do — see below.
+3. **Point the hostname at the tunnel.** A proxied CNAME onto the tunnel —
+   declarable in code, see below.
 
-## The manual step: Cloudflare hostnames
+## Cloudflare hostnames
 
 Both tunnels authenticate with a token (`CLOUDFLARE_TUNNEL_TOKEN` for the
 homelab, `ORACLE_CLOUDFLARE_TUNNEL_TOKEN` for Oracle), which means they are
 **remotely managed**: cloudflared pulls its ingress rules from the Cloudflare
-dashboard and ignores any local config file. Pulumi has no Cloudflare API
-credentials, so it cannot create those rules.
+dashboard and ignores any local config file.
 
-For each new hostname, add a public hostname to the tunnel in
-**Cloudflare Zero Trust → Networks → Tunnels**:
+Both dashboards hold a catch-all rule — everything the tunnel accepts goes to
+Traefik, which picks the backend off the `Host` header — so that rule already
+covers every current and future route. Adding a hostname is therefore purely a
+DNS concern: one proxied CNAME to `<tunnel-id>.cfargotunnel.com`.
 
-| Field    | Homelab                  | Oracle              |
-| -------- | ------------------------ | ------------------- |
-| Service  | `http://192.168.0.203:80` | `http://localhost:80` |
-| Hostname | the service's domain     | the service's domain |
+> **`bagelindustries.com` resolves every name already.** A proxied wildcard sits
+> in front of the tunnel, so a hostname nobody has ever registered still answers
+> — with Traefik's own `404 page not found`, served through the tunnel. Checked
+> 2026-08-12: `zz-nonexistent-probe-7f3a.bagelindustries.com` behaves exactly
+> like `homeassistant.bagelindustries.com` did before it had a route.
+>
+> Two consequences. A new host in this zone needs **no DNS work at all** to be
+> reachable — Consul registration is the whole job. And a 404 on a route that
+> should exist means Traefik has no matching router, *never* that DNS is
+> missing; checking `dig` will mislead you, because it answers either way.
+>
+> An explicit record is still worth declaring for a route worth keeping: it is
+> more specific than the wildcard, so it documents the hostname where the rest of
+> the route lives and survives the wildcard being narrowed or dropped.
 
-Cloudflare creates the proxied DNS record automatically. Because Traefik picks
-the backend from the `Host` header, a single catch-all rule per tunnel is enough
-to cover every current and future route — adding a hostname is then purely a DNS
-concern.
+Such a record can be declared in code:
+
+```typescript
+import { tunnelHostname } from "../../framework/cloudflare-dns";
+
+tunnelHostname(name, {
+    domain: "my-service.bagelindustries.com",
+    tunnelToken: ctx.cloudflaredTunnelToken,   // or ctx.oracleCfTunnelToken
+    provider: ctx.cloudflareProvider,
+});
+```
+
+The tunnel UUID is not a config value anyone has to keep in sync — a cloudflared
+connector token is base64 JSON carrying the account tag, the tunnel id and the
+tunnel secret, so `tunnelHostname` decodes the id straight out of the token the
+stack already holds.
+
+What that needs is a **Cloudflare API token**, which is a different thing from a
+tunnel token: the connector tokens above authenticate cloudflared and carry no
+API scope at all. The API token lives in Infisical as `CLOUDFLARE_API_TOKEN` at
+secret path `/cloudflare`, and needs only Zone:Read + DNS:Edit on
+`bagelindustries.com`. A missing one fails the deploy at that read rather than
+leaving a hostname silently unresolvable.
+
+Two caveats:
+
+- **The routes that predate this are still dashboard-managed.** Their records
+  were created by the Zero Trust UI and are not in Pulumi's state, so declaring
+  one now collides with the existing record instead of adopting it. Import it,
+  or delete it in Cloudflare first. (The wildcard above is untouched either way —
+  an explicit record simply wins over it for that one name.)
+- **A hostname on a tunnel whose ingress lacks a catch-all still needs a public
+  hostname entry** in **Zero Trust → Networks → Tunnels** (service
+  `http://192.168.0.203:80` for the homelab, `http://localhost:80` for Oracle).
+  The CNAME gets the request to the tunnel; the ingress rule is what makes
+  cloudflared answer for that host rather than 404.
 
 `/etc/cloudflared/config.yml` on the homelab node carries exactly that catch-all
 to `http://192.168.0.203:80`. It is inert for a remotely-managed tunnel and only
@@ -78,6 +121,7 @@ takes effect if the tunnel is ever switched to local management.
 | `consul.bagelindustries.com`  | homelab | Consul UI (201:8500) — **open**  |
 | `nomad.bagelindustries.com`   | homelab | Nomad UI (202:4646) — **open**   |
 | `panel.bagelindustries.com`   | oracle  | `oracle-pelican` job             |
+| `homeassistant.bagelindustries.com` | homelab | Home Assistant (200:8123) — **unmanaged host** |
 
 > **The two cluster UIs are unauthenticated.** Anyone who reaches
 > `consul.` or `nomad.` gets a full admin interface — the Nomad UI can submit
@@ -85,6 +129,38 @@ takes effect if the tunnel is ever switched to local management.
 > as-is here so the routes are not silently dropped, but they should either get
 > `authentik@consulcatalog` on their routers (once a matching Authentik provider
 > exists) or be taken off the tunnel entirely and reached over NetBird.
+
+## Routing to a host this stack does not create
+
+Traefik reads the Consul catalog, not the Proxmox inventory, so a machine
+Pulumi never provisioned can carry a route as long as something registers it.
+Modules under `external/` do exactly that — a `register` that creates a
+`consul.Node` + `consul.Service` with Traefik tags and no machine at all. They
+are auto-discovered like any other service directory.
+
+`external/homeassistant` is the current example: Home Assistant is its own
+appliance-style install on `192.168.0.200`, so the module owns the route — the
+catalog entry and the DNS record — and nothing else. Two things about that host
+are outside Pulumi's reach and have to be true for the route to work:
+
+- **The address must be pinned.** `.200` sits at the top of the Eero's DHCP
+  pool, so Home Assistant needs a reservation (or a static address on the host)
+  or the catalog entry ends up pointing at whatever leases it next.
+- **Home Assistant must trust the proxy.** It rejects proxied requests with a
+  400 until `configuration.yaml` carries
+
+  ```yaml
+  http:
+    use_x_forwarded_for: true
+    trusted_proxies:
+      - 192.168.0.203   # traefik
+  ```
+
+  and it is restarted.
+
+The route is unauthenticated at the edge on purpose: Home Assistant does its own
+auth, and the companion apps and token-based integrations cannot complete an
+Authentik login, so a forwardauth in front would lock them out.
 
 ## Authentik-protected routes
 

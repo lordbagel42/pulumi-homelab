@@ -2,6 +2,7 @@ import * as fs from "fs";
 import * as path from "path";
 import * as pulumi from "@pulumi/pulumi";
 import * as proxmox from "@muhlba91/pulumi-proxmoxve";
+import * as cloudflare from "@pulumi/cloudflare";
 
 import { allVms as vms, allLxcs as lxcs } from "./architecture";
 import { InfisicalConfig, readSecret } from "./infisical";
@@ -54,6 +55,19 @@ const grafana: GrafanaConfig = {
     apiKey:        readSecret("GCLOUD_RW_API_KEY",         grafanaInfisicalConfig),
     scrapeInterval: readSecret("GCLOUD_SCRAPE_INTERVAL",   grafanaInfisicalConfig),
 };
+
+// DNS for tunnel-backed hostnames. The tunnel tokens elsewhere in this file are
+// connector credentials and carry no API scope, so this is a separate, real API
+// token — it needs Zone:Read plus DNS:Edit on bagelindustries.com and nothing
+// else. readSecret rather than optionalSecret: a missing token should stop the
+// deploy with the name and path it looked for, not quietly leave a hostname
+// unresolvable.
+const cloudflareInfisicalConfig: InfisicalConfig = { ...infisicalConfig, secretPath: "/cloudflare" };
+const cloudflareApiToken = readSecret("CLOUDFLARE_API_TOKEN", cloudflareInfisicalConfig);
+
+const cloudflareProvider = new cloudflare.Provider("cloudflare", {
+    apiToken: cloudflareApiToken,
+});
 
 const oracleInfisicalConfig: InfisicalConfig = { ...infisicalConfig, secretPath: "/oracle" };
 const oraclePublicIp = readSecret("ORACLE_PUBLIC_IP", oracleInfisicalConfig);
@@ -182,6 +196,7 @@ const ctx: ServiceContext = {
     debianCloudImageId: debianCloudImage.id,
     cloudInitSnippetId: vmCloudInitSnippet.id,
     cloudflaredTunnelToken,
+    cloudflareProvider,
     pbsBackupPassword,
     proxmoxEndpoint: endpoint,
     proxmoxUsername: config.requireSecret("PROXMOX_USERNAME"),
@@ -201,6 +216,9 @@ discoverAndRegisterAll(ctx, [
     path.join(__dirname, "lxcs"),
     path.join(__dirname, "vms"),
     path.join(__dirname, "nomad"),
+    // Hosts this stack does not create, but does route to: modules there
+    // register a Consul catalog entry and nothing else.
+    path.join(__dirname, "external"),
 ]);
 
 // ── Garage / JuiceFS wiring ──────────────────────────────────────────────────
