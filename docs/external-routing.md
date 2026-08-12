@@ -54,7 +54,22 @@ Traefik, which picks the backend off the `Host` header — so that rule already
 covers every current and future route. Adding a hostname is therefore purely a
 DNS concern: one proxied CNAME to `<tunnel-id>.cfargotunnel.com`.
 
-That record can be declared in code:
+> **`bagelindustries.com` resolves every name already.** A proxied wildcard sits
+> in front of the tunnel, so a hostname nobody has ever registered still answers
+> — with Traefik's own `404 page not found`, served through the tunnel. Checked
+> 2026-08-12: `zz-nonexistent-probe-7f3a.bagelindustries.com` behaves exactly
+> like `homeassistant.bagelindustries.com` did before it had a route.
+>
+> Two consequences. A new host in this zone needs **no DNS work at all** to be
+> reachable — Consul registration is the whole job. And a 404 on a route that
+> should exist means Traefik has no matching router, *never* that DNS is
+> missing; checking `dig` will mislead you, because it answers either way.
+>
+> An explicit record is still worth declaring for a route worth keeping: it is
+> more specific than the wildcard, so it documents the hostname where the rest of
+> the route lives and survives the wildcard being narrowed or dropped.
+
+Such a record can be declared in code:
 
 ```typescript
 import { tunnelHostname } from "../../framework/cloudflare-dns";
@@ -83,7 +98,8 @@ Two caveats:
 - **The routes that predate this are still dashboard-managed.** Their records
   were created by the Zero Trust UI and are not in Pulumi's state, so declaring
   one now collides with the existing record instead of adopting it. Import it,
-  or delete it in Cloudflare first.
+  or delete it in Cloudflare first. (The wildcard above is untouched either way —
+  an explicit record simply wins over it for that one name.)
 - **A hostname on a tunnel whose ingress lacks a catch-all still needs a public
   hostname entry** in **Zero Trust → Networks → Tunnels** (service
   `http://192.168.0.203:80` for the homelab, `http://localhost:80` for Oracle).
