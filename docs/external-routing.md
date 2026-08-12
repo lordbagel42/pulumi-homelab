@@ -39,29 +39,56 @@ there is no inbound port forward anywhere.
    So a homelab service needs no special tag; an Oracle-hosted one must include
    `"oracle"` in its service tags.
 
-3. **Point the hostname at the tunnel.** This is the one step Pulumi does not
-   do — see below.
+3. **Point the hostname at the tunnel.** A proxied CNAME onto the tunnel —
+   declarable in code, see below.
 
-## The manual step: Cloudflare hostnames
+## Cloudflare hostnames
 
 Both tunnels authenticate with a token (`CLOUDFLARE_TUNNEL_TOKEN` for the
 homelab, `ORACLE_CLOUDFLARE_TUNNEL_TOKEN` for Oracle), which means they are
 **remotely managed**: cloudflared pulls its ingress rules from the Cloudflare
-dashboard and ignores any local config file. Pulumi has no Cloudflare API
-credentials, so it cannot create those rules.
+dashboard and ignores any local config file.
 
-For each new hostname, add a public hostname to the tunnel in
-**Cloudflare Zero Trust → Networks → Tunnels**:
+Both dashboards hold a catch-all rule — everything the tunnel accepts goes to
+Traefik, which picks the backend off the `Host` header — so that rule already
+covers every current and future route. Adding a hostname is therefore purely a
+DNS concern: one proxied CNAME to `<tunnel-id>.cfargotunnel.com`.
 
-| Field    | Homelab                  | Oracle              |
-| -------- | ------------------------ | ------------------- |
-| Service  | `http://192.168.0.203:80` | `http://localhost:80` |
-| Hostname | the service's domain     | the service's domain |
+That record can be declared in code:
 
-Cloudflare creates the proxied DNS record automatically. Because Traefik picks
-the backend from the `Host` header, a single catch-all rule per tunnel is enough
-to cover every current and future route — adding a hostname is then purely a DNS
-concern.
+```typescript
+import { tunnelHostname } from "../../framework/cloudflare-dns";
+
+tunnelHostname(name, {
+    domain: "my-service.bagelindustries.com",
+    tunnelToken: ctx.cloudflaredTunnelToken,   // or ctx.oracleCfTunnelToken
+    provider: ctx.cloudflareProvider,
+});
+```
+
+The tunnel UUID is not a config value anyone has to keep in sync — a cloudflared
+connector token is base64 JSON carrying the account tag, the tunnel id and the
+tunnel secret, so `tunnelHostname` decodes the id straight out of the token the
+stack already holds.
+
+What that needs is a **Cloudflare API token**, which is a different thing from a
+tunnel token: the connector tokens above authenticate cloudflared and carry no
+API scope at all. The API token lives in Infisical as `CLOUDFLARE_API_TOKEN` at
+secret path `/cloudflare`, and needs only Zone:Read + DNS:Edit on
+`bagelindustries.com`. A missing one fails the deploy at that read rather than
+leaving a hostname silently unresolvable.
+
+Two caveats:
+
+- **The routes that predate this are still dashboard-managed.** Their records
+  were created by the Zero Trust UI and are not in Pulumi's state, so declaring
+  one now collides with the existing record instead of adopting it. Import it,
+  or delete it in Cloudflare first.
+- **A hostname on a tunnel whose ingress lacks a catch-all still needs a public
+  hostname entry** in **Zero Trust → Networks → Tunnels** (service
+  `http://192.168.0.203:80` for the homelab, `http://localhost:80` for Oracle).
+  The CNAME gets the request to the tunnel; the ingress rule is what makes
+  cloudflared answer for that host rather than 404.
 
 `/etc/cloudflared/config.yml` on the homelab node carries exactly that catch-all
 to `http://192.168.0.203:80`. It is inert for a remotely-managed tunnel and only
@@ -96,9 +123,9 @@ Modules under `external/` do exactly that — a `register` that creates a
 are auto-discovered like any other service directory.
 
 `external/homeassistant` is the current example: Home Assistant is its own
-appliance-style install on `192.168.0.200`, so the module owns the route and
-nothing else. Two things about that host are outside Pulumi's reach and have to
-be true for the route to work:
+appliance-style install on `192.168.0.200`, so the module owns the route — the
+catalog entry and the DNS record — and nothing else. Two things about that host
+are outside Pulumi's reach and have to be true for the route to work:
 
 - **The address must be pinned.** `.200` sits at the top of the Eero's DHCP
   pool, so Home Assistant needs a reservation (or a static address on the host)

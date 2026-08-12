@@ -1,4 +1,5 @@
 import * as consul from "@pulumi/consul";
+import { tunnelHostname } from "../../framework/cloudflare-dns";
 import type { ServiceContext } from "../../framework";
 
 // Home Assistant runs on a box this stack does not create — it is its own
@@ -21,6 +22,17 @@ export const HOMEASSISTANT_PORT = 8123;
 export const HOMEASSISTANT_DOMAIN = "homeassistant.bagelindustries.com";
 
 export function register(ctx: ServiceContext): void {
+    // DNS: a proxied CNAME onto the homelab tunnel. The tunnel's ingress is a
+    // catch-all to Traefik, so this record is the entire externally-facing half
+    // of the route.
+    if (ctx.cloudflareProvider) {
+        tunnelHostname(name, {
+            domain: HOMEASSISTANT_DOMAIN,
+            tunnelToken: ctx.cloudflaredTunnelToken,
+            provider: ctx.cloudflareProvider,
+        });
+    }
+
     if (!ctx.consulProvider) return;
 
     // Synthetic node name, same reason as every other catalog registration
