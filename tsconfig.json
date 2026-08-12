@@ -14,6 +14,7 @@
     },
     "include": [
         "*.ts",
+        "external/**/*.ts",
         "framework/**/*.ts",
         "infisical/**/*.ts",
         "lxcs/**/*.ts",

@@ -201,6 +201,9 @@ discoverAndRegisterAll(ctx, [
     path.join(__dirname, "lxcs"),
     path.join(__dirname, "vms"),
     path.join(__dirname, "nomad"),
+    // Hosts this stack does not create, but does route to: modules there
+    // register a Consul catalog entry and nothing else.
+    path.join(__dirname, "external"),
 ]);
 
 // ── Garage / JuiceFS wiring ──────────────────────────────────────────────────

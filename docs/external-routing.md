@@ -78,6 +78,7 @@ takes effect if the tunnel is ever switched to local management.
 | `consul.bagelindustries.com`  | homelab | Consul UI (201:8500) — **open**  |
 | `nomad.bagelindustries.com`   | homelab | Nomad UI (202:4646) — **open**   |
 | `panel.bagelindustries.com`   | oracle  | `oracle-pelican` job             |
+| `homeassistant.bagelindustries.com` | homelab | Home Assistant (200:8123) — **unmanaged host** |
 
 > **The two cluster UIs are unauthenticated.** Anyone who reaches
 > `consul.` or `nomad.` gets a full admin interface — the Nomad UI can submit
@@ -85,6 +86,38 @@ takes effect if the tunnel is ever switched to local management.
 > as-is here so the routes are not silently dropped, but they should either get
 > `authentik@consulcatalog` on their routers (once a matching Authentik provider
 > exists) or be taken off the tunnel entirely and reached over NetBird.
+
+## Routing to a host this stack does not create
+
+Traefik reads the Consul catalog, not the Proxmox inventory, so a machine
+Pulumi never provisioned can carry a route as long as something registers it.
+Modules under `external/` do exactly that — a `register` that creates a
+`consul.Node` + `consul.Service` with Traefik tags and no machine at all. They
+are auto-discovered like any other service directory.
+
+`external/homeassistant` is the current example: Home Assistant is its own
+appliance-style install on `192.168.0.200`, so the module owns the route and
+nothing else. Two things about that host are outside Pulumi's reach and have to
+be true for the route to work:
+
+- **The address must be pinned.** `.200` sits at the top of the Eero's DHCP
+  pool, so Home Assistant needs a reservation (or a static address on the host)
+  or the catalog entry ends up pointing at whatever leases it next.
+- **Home Assistant must trust the proxy.** It rejects proxied requests with a
+  400 until `configuration.yaml` carries
+
+  ```yaml
+  http:
+    use_x_forwarded_for: true
+    trusted_proxies:
+      - 192.168.0.203   # traefik
+  ```
+
+  and it is restarted.
+
+The route is unauthenticated at the edge on purpose: Home Assistant does its own
+auth, and the companion apps and token-based integrations cannot complete an
+Authentik login, so a forwardauth in front would lock them out.
 
 ## Authentik-protected routes
 
