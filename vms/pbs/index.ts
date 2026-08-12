@@ -4,6 +4,7 @@ import * as proxmox from "@muhlba91/pulumi-proxmoxve";
 import * as command from "@pulumi/command";
 import { ip, GATEWAY } from "../../framework";
 import type { ServiceContext } from "../../framework";
+import { readSecret } from "../../infisical";
 
 // ── ServiceModule contract ─────────────────────────────────────────────────────
 export const name = "pbs";
@@ -61,6 +62,10 @@ runcmd:
         proxmoxEndpoint: pulumi.output(ctx.proxmoxEndpoint),
         proxmoxUsername: pulumi.output(ctx.proxmoxUsername),
         proxmoxPassword: pulumi.output(ctx.proxmoxPassword),
+        // Optional GDrive backup config
+        gdriveClientId: ctx.infisicalConfig ? readSecret("RCLONE_GDRIVE_CLIENT_ID", ctx.infisicalConfig) : undefined,
+        gdriveClientSecret: ctx.infisicalConfig ? readSecret("RCLONE_GDRIVE_CLIENT_SECRET", ctx.infisicalConfig) : undefined,
+        gdriveToken: ctx.infisicalConfig ? readSecret("RCLONE_GDRIVE_TOKEN", ctx.infisicalConfig) : undefined,
     });
 }
 
@@ -78,6 +83,9 @@ export interface PbsArgs {
 	proxmoxEndpoint: pulumi.Output<string>;
 	proxmoxUsername: pulumi.Output<string>;
 	proxmoxPassword: pulumi.Output<string>;
+	gdriveClientId?: pulumi.Input<string>;
+	gdriveClientSecret?: pulumi.Input<string>;
+	gdriveToken?: pulumi.Input<string>;
 }
 
 // Helper that builds an authenticated curl prefix outputting ticket/CSRF
@@ -105,8 +113,12 @@ export function createPbs({
 	proxmoxEndpoint,
 	proxmoxUsername,
 	proxmoxPassword,
+	gdriveClientId,
+	gdriveClientSecret,
+	gdriveToken,
 }: PbsArgs): void {
 	const pbsScriptPath = path.join(__dirname, "pbs-setup.sh");
+	const gdriveScriptPath = path.join(__dirname, "pbs-gdrive-setup.sh");
 
 	const pbsVm = new proxmox.VmLegacy("proxmox-backup-server", {
 		nodeName: "inspiron",
@@ -261,7 +273,7 @@ curl -sf -k -X DELETE "$ENDPOINT/api2/json/storage/${PBS_STORAGE_ID}" \\
 		},
 	}, { dependsOn: [pbsFingerprint] });
 
-	new command.local.Command("pbs-backup-job", {
+	const backupJob = new command.local.Command("pbs-backup-job", {
 		interpreter: ["/bin/bash", "-c"],
 		create: pulumi.interpolate`
 ${pveApiScript("$_PVE_ENDPOINT")}
@@ -292,4 +304,20 @@ curl -sf -k -X DELETE "$ENDPOINT/api2/json/cluster/backup/nightly-backup" \\
 			_PVE_ENDPOINT: proxmoxEndpoint,
 		},
 	}, { dependsOn: [storageRegister] });
+
+	new command.local.Command("pbs-gdrive-setup", {
+		create: `
+key=$(mktemp)
+chmod 600 "$key"
+printf '%s\n' "$_SSH_KEY" > "$key"
+ssh -i "$key" -o StrictHostKeyChecking=no root@${PBS_IP} "RCLONE_CONFIG_GDRIVE_CLIENT_ID=$_GDRIVE_ID RCLONE_CONFIG_GDRIVE_CLIENT_SECRET=$_GDRIVE_SECRET RCLONE_CONFIG_GDRIVE_TOKEN=$_GDRIVE_TOKEN bash -s" < "${gdriveScriptPath}"
+rm -f "$key"
+		`.trim(),
+		environment: {
+			_SSH_KEY: sshPrivateKey,
+			_GDRIVE_ID: gdriveClientId ?? "",
+			_GDRIVE_SECRET: gdriveClientSecret ?? "",
+			_GDRIVE_TOKEN: gdriveToken ?? "",
+		},
+	}, { dependsOn: [backupJob] });
 }
