@@ -6,7 +6,9 @@
         "test": "tsc && node --test tests/*.test.cjs"
     },
     "devDependencies": {
+        "@ampcode/plugin": "0.0.0-20260922001754-ga9ffbd3",
         "@types/node": "^18",
+        "symbol-observable": "4.0.0",
         "typescript": "^5.0.0"
     },
     "dependencies": {

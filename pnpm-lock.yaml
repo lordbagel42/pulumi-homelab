@@ -39,14 +39,23 @@ importers:
         specifier: ^4.1.1
         version: 4.1.1
     devDependencies:
+      '@ampcode/plugin':
+        specifier: 0.0.0-20260922001754-ga9ffbd3
+        version: 0.0.0-20260922001754-ga9ffbd3
       '@types/node':
         specifier: ^18
         version: 18.19.130
+      symbol-observable:
+        specifier: 4.0.0
+        version: 4.0.0
       typescript:
         specifier: ^5.0.0
         version: 5.9.3
 
 packages:
+
+  '@ampcode/plugin@0.0.0-20260922001754-ga9ffbd3':
+    resolution: {integrity: sha512-BRo3e4j+8M1lb/Vn64pQc4rWMjAy+yakYYS4GnMsttlj2h49kd/B/tDlJ1JaOQ8g6YVWwtYg3DMno3TDihzVww==}
 
   '@aws-crypto/crc32@5.2.0':
     resolution: {integrity: sha512-nLbCWqQNgUiwwtFsen1AdzAtvuLRsQS8rYgMuxCrdKf9kOssamGLuPwyTY9wyYblNr9+1XM8v6zoDTPPSIeANg==}
@@ -1161,6 +1170,10 @@ packages:
     resolution: {integrity: sha512-ot0WnXS9fgdkgIcePe6RHNk1WA8+muPa6cSjeR3V8K27q9BB1rTE3R1p7Hv0z1ZyAc8s6Vvv8DIyWf681MAt0w==}
     engines: {node: '>= 0.4'}
 
+  symbol-observable@4.0.0:
+    resolution: {integrity: sha512-b19dMThMV4HVFynSAM1++gBHAbk2Tc/osgLIBZMKsyqh34jb2e8Os7T6ZW/Bt3pJFdBTd2JwAnAAEQV7rSNvcQ==}
+    engines: {node: '>=0.10'}
+
   tar@7.5.15:
     resolution: {integrity: sha512-dzGK0boVlC4W5QFuQN1EFSl3bIDYsk7Tj40U6eIBnK2k/8ml7TZ5agbI5j5+qnoVcAA+rNtBml8SEiLxZpNqRQ==}
     engines: {node: '>=18'}
@@ -1264,6 +1277,8 @@ packages:
     resolution: {integrity: sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ==}
 
 snapshots:
+
+  '@ampcode/plugin@0.0.0-20260922001754-ga9ffbd3': {}
 
   '@aws-crypto/crc32@5.2.0':
     dependencies:
@@ -2791,6 +2806,8 @@ snapshots:
   strnum@2.3.0: {}
 
   supports-preserve-symlinks-flag@1.0.0: {}
+
+  symbol-observable@4.0.0: {}
 
   tar@7.5.15:
     dependencies:
