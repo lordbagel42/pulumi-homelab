@@ -42,7 +42,12 @@ const zones = new Map<string, pulumi.Output<cloudflare.GetZoneResult>>();
 function getZone(zone: string, provider: cloudflare.Provider): pulumi.Output<cloudflare.GetZoneResult> {
     let result = zones.get(zone);
     if (!result) {
-        result = cloudflare.getZoneOutput({ filter: { name: zone } }, { provider });
+        // Invokes do not defer for unknown provider credentials alone. Make
+        // the lookup input unknown too until the token exists, so a first
+        // preview cannot treat an empty provider result as a resolved zone.
+        // Only the public zone name leaves this apply, never the API token.
+        const name = pulumi.unsecret(provider.apiToken.apply(() => zone));
+        result = cloudflare.getZoneOutput({ filter: { name } }, { provider });
         zones.set(zone, result);
     }
     return result;
