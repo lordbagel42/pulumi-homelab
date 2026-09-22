@@ -1,0 +1,15 @@
+{
+  "name": "slack-huddle-phone-relay",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "esbuild web/relay.js --bundle --format=esm --platform=browser --main-fields=browser,module,main --define:global=globalThis --target=chrome120 --outfile=web/dist/relay.js",
+    "test": "node --test tests/*.test.js"
+  },
+  "dependencies": {
+    "amazon-chime-sdk-js": "3.32.0"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2"
+  }
+}

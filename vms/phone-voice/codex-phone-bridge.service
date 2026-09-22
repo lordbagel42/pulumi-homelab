@@ -1,0 +1,35 @@
+[Unit]
+Description=Persistent Amp phone sessions and legacy callbacks
+After=network-online.target docker.service
+Wants=network-online.target
+ConditionPathExists=/var/lib/codex-phone/activated
+ConditionPathExists=/var/lib/codex-phone/models/en_US-lessac-medium.onnx
+
+[Service]
+User=codex-phone
+Group=codex-phone
+SupplementaryGroups=docker
+WorkingDirectory=/var/lib/codex-phone/workspace
+ExecStart=/opt/phone-voice/venv/bin/python /opt/phone-voice/current/bridge.py
+Environment=PYTHONUNBUFFERED=1
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+Environment=CODEX_BIN=/usr/local/bin/codex
+Environment=PHONE_AGENT_ENGINE=amp
+Environment=AMP_BIN=/var/lib/codex-phone/.amp/bin/amp
+Environment=AMP_RUNNER_ID=homelab-amp
+Environment=AMP_RUNNER_DIR=/home/amp/workspaces
+Environment=CODEX_HOME=/var/lib/codex-phone/.codex
+Environment=CODEX_PHONE_WORKSPACE=/var/lib/codex-phone/workspace
+Environment=CODEX_PHONE_PBX_HOST=192.168.0.233
+Environment=CODEX_PHONE_SOCKET=/var/lib/codex-phone/state/control.sock
+Environment=CODEX_PHONE_WORKSTATION_SOCKET=/var/lib/codex-phone/workstation-app-server.sock
+Environment=CODEX_PHONE_WORKSTATION_WORKSPACE=/home/raygen/Projects/cisco-phone-shenanigans
+Environment=WHISPER_CPU_THREADS=4
+Environment=WHISPER_MODEL=base.en
+UMask=0077
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

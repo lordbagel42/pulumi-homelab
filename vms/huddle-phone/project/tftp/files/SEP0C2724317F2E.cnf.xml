@@ -1,0 +1,33 @@
+<device>
+  <fullConfig>true</fullConfig>
+  <deviceProtocol>SCCP</deviceProtocol>
+  <devicePool>
+    <dateTimeSetting>
+      <dateTemplate>M/D/Y</dateTemplate>
+      <timeZone>Central Standard/Daylight Time</timeZone>
+    </dateTimeSetting>
+    <callManagerGroup>
+      <name>LabPBX</name>
+      <members>
+        <member priority="0">
+          <callManager>
+            <name>192.168.0.105</name>
+            <description>LabPBX</description>
+            <ports>
+              <ethernetPhonePort>2000</ethernetPhonePort>
+            </ports>
+            <processNodeName>192.168.0.233</processNodeName>
+          </callManager>
+        </member>
+      </members>
+    </callManagerGroup>
+  </devicePool>
+  <loadInformation>SCCP45.9-4-2SR3-1S</loadInformation>
+  <userLocale>
+    <name>English_United_States</name>
+    <langCode>en</langCode>
+  </userLocale>
+  <networkLocale>United_States</networkLocale>
+  <sshUserId></sshUserId>
+  <sshPassword></sshPassword>
+</device>

@@ -1,0 +1,4 @@
+#!/bin/sh
+# Install inside the PBX runtime with a private Switchboard client registration.
+cd /opt/phone-platform/current || exit 1
+exec /opt/phone-platform/venv/bin/python -m phone_platform.task_agi "$@"

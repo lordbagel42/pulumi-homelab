@@ -1,0 +1,20 @@
+--- a/asterisk/extensions.conf
++++ b/asterisk/extensions.conf
+@@ -59,7 +59,7 @@
+  ; UUID prefix carries the session code; the rest remains random per call.
+  same => n,ExecIf($["${CODEX_SESSION}" = ""]?Set(CODEX_SESSION=000))
+  same => n,Set(CODEX_CALL_ID=${CODEX_SESSION}${CODEX_CALL_ID:3})
+- same => n,AudioSocket(${CODEX_CALL_ID},127.0.0.1:9092)
++ same => n,AudioSocket(${CODEX_CALL_ID},127.0.0.1:9096)
+  same => n,Hangup()
+ 
+ [home-assistant-voice]
+@@ -75,6 +75,7 @@
+  same => n,Set(TIMEOUT(absolute)=3600)
+  same => n,Set(OPERATOR_CALL_ID=${SHELL(cat /proc/sys/kernel/random/uuid)})
+  same => n,Set(OPERATOR_CALL_ID=${OPERATOR_CALL_ID:0:36})
++ same => n,Set(OPERATOR_CALL_ID=f100${OPERATOR_CALL_ID:4})
+  same => n,ExecIf($["${OPERATOR_DIRECTORY}" != ""]?Set(OPERATOR_CALL_ID=d100${OPERATOR_DIRECTORY}${OPERATOR_CALL_ID:8}))
+- same => n,AudioSocket(${OPERATOR_CALL_ID},127.0.0.1:9095)
++ same => n,AudioSocket(${OPERATOR_CALL_ID},127.0.0.1:9096)
+  same => n,Hangup()

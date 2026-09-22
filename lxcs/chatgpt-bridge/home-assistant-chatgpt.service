@@ -1,0 +1,33 @@
+[Unit]
+Description=Home Assistant ChatGPT bridge
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=chatgpt-bridge
+Group=chatgpt-bridge
+WorkingDirectory=/var/lib/chatgpt-bridge
+ExecStart=/usr/bin/python3 /opt/chatgpt-bridge/chatgpt_gateway.py
+Environment=CHATGPT_CODEX_BIN=/usr/local/bin/codex
+Environment=CHATGPT_BRIDGE_HOST=192.168.0.213
+Environment=CHATGPT_BRIDGE_PORT=11435
+Environment=CHATGPT_BRIDGE_CLIENTS=192.168.0.200,192.168.0.105,192.168.0.213,127.0.0.1
+Environment=CHATGPT_BRIDGE_TOKEN_FILE=/var/lib/chatgpt-bridge/token
+Environment=CHATGPT_BRIDGE_MODEL=gpt-6-astra
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+UMask=0077
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=10
+KillMode=control-group
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/chatgpt-bridge
+CapabilityBoundingSet=
+RestrictSUIDSGID=true
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,13 @@
+#!/bin/sh
+# Works from a release directory or the current symlink. No shell credentials.
+set -eu
+switchboard_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+if [ -x "$switchboard_root/.venv/bin/python" ]; then
+    switchboard_python="$switchboard_root/.venv/bin/python"
+elif [ -x /opt/phone-platform/venv/bin/python ]; then
+    switchboard_python=/opt/phone-platform/venv/bin/python
+else
+    switchboard_python=python3
+fi
+export PYTHONPATH="$switchboard_root${PYTHONPATH:+:$PYTHONPATH}"
+exec "$switchboard_python" -m phone_platform.client "$@"

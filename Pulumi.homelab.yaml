@@ -1,2 +1,42 @@
 environment:
-- default/homelab
+  - default/homelab
+config:
+  ai-proxy:enabled: "true"
+  ai-proxy:sshHostKey: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAICKu8R0MF7Ord31qJPrzygHfwRf1frLzUgOzdTe62BUC root@localhost
+  huddle-phone:enabled: "true"
+  huddle-phone:dryRun: "false"
+  huddle-phone:workspace: hackclub.enterprise
+  huddle-phone:teamId: T0266FRGM
+  huddle-phone:enterpriseId: E09V59WQY1E
+  huddle-phone:channelId: C08T6CY7S10
+  huddle-phone:clientToken:
+    secure: AAABAAlEy2IWaZv0Bzk8aVKtOwj+F5V959rdG25tmqTnUrA3J1hY9qH9FIQDA1me3kNM9AZmiBcKWdVBdDPvoPGQONIF9S/au2IXsP0IJNpQyaySZMux9DxMh4alO2wucjzPDQ+itr7r2Fy7kIQCpHquVTP/u7S2/JgqTwTgutJ4bn5J3NZZBHJ/NnWfI4PJrg==
+  huddle-phone:cookie:
+    secure: AAABALTAiQZzmti2TLpjXXp8NRcJ0XPP/wOX2pVORQ3eEYXx19V++JocdiMnJ8lLhx8HIaVbtoszAgHZOvgSfyRXXsAdiicwlD+7Xj4RwvkLLQGsw859xjaJkhZFcJTDQBRsLzWIguOBSGdwJHI1FlPVI8TRDdVMxPz9Y+e/8EAVT4YvLYtZ3ruE8PXWTud14Gwe+wiuB4vofRWhd1F1vm//7DgfHskT55jTHKyNm/U02V92O5bAYfpWzRwGnfi88aB8Wbm2oB65HE0bXwrPpGnDsoR+OokhuAdSCJEqhXsb6WjiQ2xq4QsdGTOL3YGB6h0BsSNwdFQqAhRTQQD9WcAZv42BgFEkj1pNzXQyUKvF2VuoxmaEKowrUg==
+  huddle-phone:amiSecret:
+    secure: AAABAPE8xat7gQWc4E1/y0gc2G1oByrmjz4ftAkNJffd46FQr+OxwJUiiyIccq1UTinD/xV5n4fuRvrOQyUTIADIGO6eYohV3BVu
+  ai-proxy:image: ai-proxy:proxmox-77deb4b95f4b
+  ai-proxy:replicas: "1"
+  ai-proxy:servingEnabled: "true"
+  ai-proxy:environment:
+    secure: AAABAG4ULCuJEThIZldzUsh656hBIz8N+jq7gLkUPrMFbOLtqdhCpXL7EMz9kdM1uH9tvao5gVj/KSLV/cazM/qSgeO33RKPl69PYBv+53qOQ9jkXLorkOEPfmNYnnuT2oyt5BxIJzQJJ+hE4mlomdyD8ASc2lfuwmCCBhYVnTc117sTdY1QVaEgrixY/JKswF/540pvPy0otDbvboxCTyq109AVsFEZ7mfGQE2dcQSIeHpkmxGqFx1Jt1ACMm3unZXmV/XA1ooNgps3oywIx3vbKKxXApZ01qsyJivt8cW9O42W1704PBZ6p/7bCQuChTbDXk4O4TgyEibEGyxdKwAOyqp4QcrHrkxKtXRH+4I9pwFhtcXlXZ6Pc6dBABZoBPMxJ3cCQo9qzaVRkz4k/rFpoGveaUpdQBijDJ0d2hyEldyZpvY1uJkS0fQBNUGtU+5OaeXnW7hLF3GcfdslsvIGDPHWeg74pzJa8gO4W9mI3DJxB0CdURI9yHSVtxQIWbnG7L3v+9PeEIq1UbLtVAY976SXK/uz8vZaa8xj16Q7YzGGXqpKpeEPEz8iCn8AoWB4/2WyBHugNVeH8imsgexaWm0TN2xHqmpylDezDrN3epoflyQLJjws/mclaC3H1ZwmV8q3XQSSYchtBKtUYEHtCbWk9MHxGbIqA1GB+HDgmhNfsfbW5arHykXgtZDUNnxKt63eaVOb9ofVZXuDfIeKt2p+doyp3NYS3jQJFVUP35Rpjd33wYiS5ddReiBaarSV69XLSEmqDlSFCs+LRRFhyihft/ZkCts1CstttKfjj3/qlrbWRIdFtvpQIjzdyeC3EK1qHFbvRQ4SQ+mfGAQeJahJKS87z08m0w==
+  chatgpt-bridge:enabled: "true"
+  chatgpt-bridge:rootPassword:
+    secure: AAABANWMFvAyGosWuCgyKbZs/Z5vT0AjfBZW9WgoQ3yqdMSyA6WKll7P5vr0mYJ8R/q/uCXugsNbIMVku77OHAlwTeNKbQyRNjYC
+  chatgpt-bridge:token:
+    secure: AAABAKQ8rI+nl9TGAzG69ttcr9pbFmHi0Ecj+ED/8zlnl34eIpinnAhH8F58i/KZ9afjLtf42WUtq1hPl1s2T2pimrff89DI/GmiaynRW/O1xcMSobbOh0zajrKy1Z66
+  huddle-phone:sshHostKey: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKEe4SS4+UeLGUApCgru2PyWN08OoTI+ZXAss9DhSE6I root@localhost
+  chatgpt-bridge:sshHostKey: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPuU5lQjHmJzJqWTYEFy2hUKUctFIBCCzFQpM8m66MVa root@chatgpt-bridge
+  phone-voice:enabled: "true"
+  phone-voice:tunnelPublicKey: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJPb6k783xdf/OK/lYzwRENGKkcBHdu/aTn/rhLkX1gE codex-phone-control-tunnel
+  phone-voice:homeAssistantConfig:
+    secure: AAABABvC0cI5oD0bmOw7wcarTenL66h+QLcgaEzNq7cjKDugDsyq3eOn7JdpmDyDX/Dg+lgxTuHd+H9m56MSQJnMVYGicQHOlWzu5AtFpbw2PO0STx5g65UpGurSdrCvevOQCvs2MkLByde+/G5YrJGlPRfDRV7xkymJ73KepFJ5yjCUegOeMb/Bi6FykSF8xJuKYILrYDHQUPWLD6AEmsMmQ4wPAXgoKvlbAa9RQ7HSPsxaHUtyTUuYZRgUi4r42q56WigdahoNNn0EtXy/W9okxkwwl/RwPS4CtaPSRUpSjhqPObP25iQ9JWNJH2/Smr4R+XjpcQcpJNlgV+b2mMlZUvzHN5zsTRbcyrPkqAHJvTWwE4ddChdnlUTLdrNWJYnRNskpglpShIzSpLo8/eKT5/hbj4je0tn+/vHVNvzDtsuv3tQ=
+  phone-voice:dhcpEnabled: "false"
+  huddle-phone:operatorSecret:
+    secure: AAABAF1of2ggR1IF1iPMNm8Gyy0eaq3zjYv+EiSfY4HLx9p3JYV6Wgsr0hu/LdM5AGZ6e5Yz0wEvNyHGrBiZ0YOaT4CzDP07su6X
+  huddle-phone:operatorOwnerId: U08R4KDL6UF
+  phone-platform:adminToken:
+    secure: AAABACY/Bjj/XyLIIQnH8Dg6b21dl35yD7sJJK1T6rXI86UJO0Bcr9WVj2+qZTlPKzXAVIPhgSphAsHVNJTVEFFv08GamwzdgLLCHdg5uQ5mGHxGBEPzplE46UTSxKh1
+  phone-platform:phoneToken:
+    secure: AAABAEbrTgro29QfhJMQouV+qz6PJsEeUqN9SPXxFkopBxLW4LAISGGsBszSSvZfMgI7HZH4JZ36INHhMXOJloBDLAbOzDYlDU2xBYVZDocZK5SZBYyZkGAmh3snWLt6
+  phone-platform:enabled: "true"

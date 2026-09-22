@@ -1,0 +1,14 @@
+[Unit]
+Description=Switchboard laptop attention notifications
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/raygen/Projects/cisco-phone-shenanigans/phone-platform
+ExecStart=/home/raygen/Projects/cisco-phone-shenanigans/phone-platform/.venv/bin/python -m phone_platform.notifier
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=graphical-session.target

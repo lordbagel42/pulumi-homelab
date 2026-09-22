@@ -1,0 +1,41 @@
+[Unit]
+Description=Switchboard phone dashboard and integration API
+After=network-online.target codex-phone-bridge.service
+Wants=network-online.target
+ConditionPathExists=/var/lib/codex-phone/switchboard/admin-token
+
+[Service]
+User=codex-phone
+Group=codex-phone
+SupplementaryGroups=docker
+WorkingDirectory=/opt/phone-platform/current
+ExecStart=/opt/phone-platform/venv/bin/python -m phone_platform
+Environment=PYTHONUNBUFFERED=1
+Environment=PATH=/opt/phone-platform/current/bin:/usr/local/bin:/usr/bin:/bin
+Environment=PHONE_PLATFORM_HOST=0.0.0.0
+Environment=PHONE_PLATFORM_PORT=8088
+Environment=PHONE_PLATFORM_SPEECH_ENGINE_HOST=127.0.0.1
+Environment=PHONE_PLATFORM_SPEECH_ENGINE_PORT=9096
+Environment=PHONE_PLATFORM_SPEECH_ENGINE_PEERS=127.0.0.1
+Environment=PHONE_PLATFORM_STATE_DIR=/var/lib/codex-phone/switchboard
+Environment=PHONE_PLATFORM_TOKEN_FILE=/var/lib/codex-phone/switchboard/admin-token
+Environment=PHONE_PLATFORM_PHONE_TOKEN_FILE=/var/lib/codex-phone/switchboard/phone-token
+Environment=PHONE_PLATFORM_VOICE_SOCKET=/var/lib/codex-phone/state/control.sock
+Environment=PHONE_PLATFORM_VOICE_DIR=/opt/phone-voice/current
+Environment=PHONE_PLATFORM_MODELS_DIR=/var/lib/codex-phone/models
+Environment=PHONE_PLATFORM_HOME_ASSISTANT_CONFIG=/var/lib/codex-phone/home-assistant.json
+Environment=PHONE_PLATFORM_HUDDLE_CONFIG=/var/lib/codex-phone/switchboard/huddle.json
+Environment=PHONE_PLATFORM_DIALPLAN_DIR=/var/lib/codex-phone/switchboard/asterisk
+Environment=WHISPER_MODEL=base.en
+Environment=WHISPER_CPU_THREADS=4
+UMask=0077
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=30
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/codex-phone/switchboard /var/lib/codex-phone/models
+
+[Install]
+WantedBy=multi-user.target

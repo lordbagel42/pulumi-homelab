@@ -1,0 +1,44 @@
+# Opt in with: docker compose -f docker-compose.yml -f docker-compose.huddle.yml ...
+# Run on a Linux VM in Proxmox, with Asterisk and the bot on the same VM.
+x-huddle: &huddle
+  build: ./huddle-phone
+  image: huddle-phone:local
+  network_mode: host
+  env_file:
+    - ./huddle-phone/.env
+  volumes:
+    - huddle-state:/state
+  read_only: true
+  tmpfs:
+    - /tmp:mode=1777
+    - /home/bridge:uid=10001,gid=10001,mode=700
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  shm_size: 512m
+  stop_grace_period: 90s
+  mem_limit: 3g
+  cpus: 2.0
+  logging:
+    driver: json-file
+    options:
+      max-size: 10m
+      max-file: "3"
+
+services:
+  pbx:
+    volumes:
+      - ./huddle-phone/generated/manager.conf:/etc/asterisk/manager.conf:ro
+      - ./asterisk/extensions_huddle.conf:/etc/asterisk/extensions_huddle.conf:ro
+
+  huddle-phone:
+    <<: *huddle
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os, urllib.request; urllib.request.urlopen('http://127.0.0.1:' + os.environ.get('HTTP_PORT', '8099') + '/healthz', timeout=5)"]
+      interval: 30s
+      timeout: 6s
+      retries: 3
+      start_period: 90s
+
+volumes:
+  huddle-state:

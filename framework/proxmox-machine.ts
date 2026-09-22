@@ -44,7 +44,14 @@ export interface ProxmoxMachineArgs {
     nodeName?: string;
     vmId: number;
     cpu?: number;
+    cpuType?: string;
+    /** LXC hard CPU quota, measured in cores (0 means unlimited). */
+    cpuLimit?: number;
+    /** LXC scheduling weight; cgroup v2 defaults to 100. */
+    cpuUnits?: number;
     memory?: number;
+    /** LXC swap allowance in MiB. */
+    swap?: number;
     disk?: number;
     datastoreId?: string;
     templateFileId?: pulumi.Input<string>;
@@ -105,8 +112,8 @@ export class ProxmoxMachine extends pulumi.ComponentResource {
             this.machine = new proxmox.ContainerLegacy(name, {
                 nodeName: args.nodeName || "optiplex",
                 vmId: args.vmId,
-                cpu: { cores: args.cpu || 1 },
-                memory: { dedicated: args.memory || 512 },
+                cpu: { cores: args.cpu || 1, limit: args.cpuLimit, units: args.cpuUnits },
+                memory: { dedicated: args.memory || 512, swap: args.swap },
                 disk: { datastoreId: args.datastoreId || "local-lvm", size: args.disk || 8 },
                 operatingSystem: {
                     templateFileId: args.templateFileId ?? `local:vztmpl/${LXC_TEMPLATE_FILE}`,
@@ -133,7 +140,7 @@ export class ProxmoxMachine extends pulumi.ComponentResource {
                 vmId: args.vmId,
                 name: name,
                 agent: { enabled: true, trim: true, type: "virtio" },
-                cpu: { cores: args.cpu || 1, type: "x86-64-v2-AES" },
+                cpu: { cores: args.cpu || 1, type: args.cpuType || "x86-64-v2-AES" },
                 memory: { dedicated: args.memory || 1024 },
                 disks: [{
                     datastoreId: args.datastoreId || "local-lvm",

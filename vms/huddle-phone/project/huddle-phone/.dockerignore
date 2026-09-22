@@ -1,0 +1,8 @@
+.env
+.venv
+node_modules
+web/dist
+generated
+state
+__pycache__
+**/__pycache__

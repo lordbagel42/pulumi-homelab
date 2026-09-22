@@ -1,0 +1,39 @@
+# Cisco SCCP lab PBX.
+# host networking is required: SCCP (tcp/2000), TFTP (udp/69) and RTP
+# (udp/10000-20000) must be reachable by the phones on the LAN without NAT.
+services:
+  pbx:
+    build: ./pbx
+    image: pbx-sccp:latest
+    container_name: sccp-pbx
+    network_mode: host
+    restart: unless-stopped
+    volumes:
+      - ./asterisk/sccp.conf:/etc/asterisk/sccp.conf:ro
+      - ./asterisk/extensions.conf:/etc/asterisk/extensions.conf:ro
+      - ./asterisk/rtp.conf:/etc/asterisk/rtp.conf:ro
+      # Directory mount keeps atomically rewritten dashboard aliases visible.
+      - ${PHONE_PLATFORM_ASTERISK_DIR:-/var/lib/codex-phone/switchboard/asterisk}:/etc/asterisk/switchboard:ro
+
+  tftp:
+    build: ./tftp
+    image: sccp-tftp:latest
+    container_name: sccp-tftp
+    network_mode: host
+    restart: unless-stopped
+    volumes:
+      - ./tftp/files:/srv/tftp:ro
+
+  # Temporary factory-reset recovery for the one MAC in this config.
+  # Start explicitly with: docker compose --profile recovery up -d recovery-dhcp
+  recovery-dhcp:
+    profiles: [recovery]
+    image: sccp-tftp:latest
+    container_name: sccp-recovery-dhcp
+    network_mode: host
+    restart: "no"
+    cap_add:
+      - NET_ADMIN
+    volumes:
+      - ./recovery/dnsmasq.conf:/etc/cisco-recovery.conf:ro
+    command: ["dnsmasq", "--conf-file=/etc/cisco-recovery.conf"]

@@ -1,0 +1,171 @@
+- name: Provision the Amp runner
+  hosts: all
+  become: true
+  tasks:
+    - name: Install development tools
+      ansible.builtin.apt:
+        name:
+          - build-essential
+          - ca-certificates
+          - curl
+          - fd-find
+          - git
+          - gh
+          - jq
+          - nodejs
+          - npm
+          - openssh-client
+          - python3
+          - python3-pip
+          - python3-venv
+          - ripgrep
+          - rsync
+          - sudo
+          - tmux
+          - unzip
+          - xz-utils
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Create the unprivileged runner account
+      ansible.builtin.user:
+        name: amp
+        shell: /bin/bash
+        create_home: true
+        password_lock: true
+
+    - name: Create private runner directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: amp
+        group: amp
+        mode: "0700"
+      loop:
+        - /home/amp
+        - /home/amp/.ssh
+        - /home/amp/.local
+        - /home/amp/.local/bin
+        - /home/amp/.local/share
+        - /home/amp/.local/share/amp
+        - /home/amp/workspaces
+
+    - name: Allow the provisioning SSH key to log in as amp
+      ansible.builtin.copy:
+        remote_src: true
+        src: /root/.ssh/authorized_keys
+        dest: /home/amp/.ssh/authorized_keys
+        owner: amp
+        group: amp
+        mode: "0600"
+
+    - name: Check whether Amp is already installed
+      ansible.builtin.stat:
+        path: /home/amp/.amp/bin/amp
+      register: amp_binary
+
+    - name: Download the official Amp installer
+      ansible.builtin.get_url:
+        url: https://ampcode.com/install.sh
+        dest: /home/amp/.local/share/amp/install.sh
+        owner: amp
+        group: amp
+        mode: "0700"
+      when: not amp_binary.stat.exists
+
+    - name: Install Amp as the runner user
+      # Ansible's SSH PTY otherwise makes the installer wait for a PATH prompt.
+      ansible.builtin.shell: /bin/bash /home/amp/.local/share/amp/install.sh </dev/null
+      args:
+        creates: /home/amp/.amp/bin/amp
+      become_user: amp
+      environment:
+        HOME: /home/amp
+
+    - name: Install pnpm
+      ansible.builtin.command: npm install --global pnpm@10.33.0
+      args:
+        creates: /usr/local/bin/pnpm
+
+    - name: Add user-installed tools to login shells
+      ansible.builtin.copy:
+        dest: /etc/profile.d/amp-tools.sh
+        mode: "0644"
+        content: |
+          export PATH="$HOME/.amp/bin:$HOME/.local/bin:$PATH"
+
+    - name: Install the persistent runner service
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/amp-runner.service
+        mode: "0644"
+        content: |
+          [Unit]
+          Description=Amp homelab runner
+          After=network-online.target
+          Wants=network-online.target
+          # Sign in once as amp, then start this service. Never copy desktop credentials.
+          ConditionPathExists=/home/amp/.local/share/amp/secrets.json
+
+          [Service]
+          Type=simple
+          User=amp
+          Group=amp
+          WorkingDirectory=/home/amp/workspaces
+          Environment=HOME=/home/amp
+          Environment=PATH=/home/amp/.amp/bin:/home/amp/.local/bin:/usr/local/bin:/usr/bin:/bin
+          ExecStart=/home/amp/.amp/bin/amp --no-tui --runner-id homelab-amp --discover-dirs --remote-control-terminal
+          Restart=always
+          RestartSec=10
+          TimeoutStopSec=60
+          KillMode=control-group
+          Nice=10
+          IOSchedulingClass=best-effort
+          IOSchedulingPriority=7
+          IOWeight=25
+          MemoryHigh=10G
+          MemoryMax=11G
+          MemorySwapMax=0
+          TasksMax=2048
+          OOMPolicy=stop
+          NoNewPrivileges=true
+          UMask=0077
+
+          [Install]
+          WantedBy=multi-user.target
+      notify: Restart Amp runner
+
+    - name: Create the journal configuration directory
+      ansible.builtin.file:
+        path: /etc/systemd/journald.conf.d
+        state: directory
+        mode: "0755"
+
+    - name: Bound journal storage
+      ansible.builtin.copy:
+        dest: /etc/systemd/journald.conf.d/amp-runner.conf
+        mode: "0644"
+        content: |
+          [Journal]
+          SystemMaxUse=256M
+          RuntimeMaxUse=64M
+      notify: Restart journald
+
+    - name: Enable the runner (waits for first login)
+      ansible.builtin.systemd_service:
+        name: amp-runner
+        enabled: true
+        state: started
+        daemon_reload: true
+
+  handlers:
+    - name: Restart Amp runner
+      ansible.builtin.systemd_service:
+        name: amp-runner
+        state: restarted
+        daemon_reload: true
+
+    - name: Restart journald
+      ansible.builtin.systemd_service:
+        name: systemd-journald
+        state: restarted

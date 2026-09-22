@@ -1,0 +1,8 @@
+fastapi==0.141.1
+uvicorn==0.53.0
+httpx==0.28.1
+python-multipart==0.0.32
+PyJWT==2.10.1
+websockets==15.0.1
+elevenlabs==2.68.0
+audioop-lts==0.2.2; python_version >= "3.13"

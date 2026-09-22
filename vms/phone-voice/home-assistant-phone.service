@@ -1,0 +1,23 @@
+[Unit]
+Description=Home Assistant on Cisco extension 555
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=/var/lib/codex-phone/activated
+ConditionPathExists=/var/lib/codex-phone/models/en_US-lessac-medium.onnx
+
+[Service]
+User=codex-phone
+Group=codex-phone
+WorkingDirectory=/var/lib/codex-phone/workspace
+ExecStart=/opt/phone-voice/venv/bin/python /opt/phone-voice/current/home_assistant_bridge.py
+Environment=PYTHONUNBUFFERED=1
+Environment=HOME_ASSISTANT_CONFIG=/var/lib/codex-phone/home-assistant.json
+Environment=WHISPER_CPU_THREADS=4
+Environment=WHISPER_MODEL=base.en
+UMask=0077
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,4 @@
+faster-whisper==1.2.1
+piper-tts==1.8.0
+webrtcvad-wheels==2.0.14
+mcp==1.30.0

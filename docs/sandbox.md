@@ -1,5 +1,10 @@
 # Poke Sandbox VM
 
+**Retired:** The deployed `sandbox-next` LXC (232) and its MCP services have been
+removed in favor of the [Amp runner](../lxcs/amp-runner/README.md). The notes below
+describe the old design, not a deployable service. Its Infisical secrets were
+retained; they are no longer consumed by this stack.
+
 An **optional** dedicated Proxmox VM that serves as a persistent sandbox for
 [Poke](https://poke.com) to run code and stateful tools, hosting long-lived MCP
 bridge servers (Claude Code and other stateful/"dangerous" tools) behind an
