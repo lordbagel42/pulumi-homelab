@@ -290,6 +290,9 @@
             traefik:
               address: ":8080"
           providers:
+            file:
+              filename: /etc/traefik/transports.yml
+              watch: true
             consulCatalog:
               prefix: traefik
               exposedByDefault: false
@@ -298,6 +301,18 @@
               endpoint:
                 address: "127.0.0.1:8500"
                 scheme: http
+      when: role == 'traefik'
+
+    # Proxmox uses a self-signed certificate. Never disable verification on
+    # the default transport: only the proxmox service opts into this one.
+    - name: Configure Proxmox TLS transport
+      copy:
+        dest: /etc/traefik/transports.yml
+        content: |
+          http:
+            serversTransports:
+              proxmox:
+                insecureSkipVerify: true
       when: role == 'traefik'
 
     # ── Cloudflare tunnel ──────────────────────────────────────────────────────
