@@ -64,18 +64,24 @@ mv "$env_file" /etc/ai-proxy/ai-proxy.env
         addPreviousOutputInEnv: false,
     }, { dependsOn: [storage], additionalSecretOutputs: ["stdout", "stderr"] });
 
+    // Nomad submissions may be API JSON after an out-of-band update. The
+    // provider reads that source back into jobspec without changing its format
+    // flag. Keep HCL as the source of truth, but use JSON consistently in state.
+    const parsed = nomad.getJobParserOutput({
+        hcl: fs.readFileSync(path.join(__dirname, "ai-proxy.nomad.hcl"), "utf-8"),
+        variables: pulumi.jsonStringify({
+            image,
+            replicas,
+            serving_enabled: config.getBoolean("servingEnabled") ?? false,
+            // A changed environment file must restart the process that loaded it.
+            environment_revision: environment.apply((value) =>
+                crypto.createHash("sha256").update(value).digest("hex")),
+        }),
+    }, { provider: ctx.nomadProvider, dependsOn: clusterDeps });
+
     const job = new nomad.Job(name, {
-        jobspec: fs.readFileSync(path.join(__dirname, "ai-proxy.nomad.hcl"), "utf-8"),
-        hcl2: {
-            vars: {
-                image,
-                replicas: String(replicas),
-                serving_enabled: String(config.getBoolean("servingEnabled") ?? false),
-                // A changed environment file must restart the process that loaded it.
-                environment_revision: environment.apply((value) =>
-                    crypto.createHash("sha256").update(value).digest("hex")),
-            },
-        },
+        jobspec: parsed.json,
+        json: true,
         detach: false,
         purgeOnDestroy: false,
     }, { provider: ctx.nomadProvider, dependsOn: [secrets, ...clusterDeps] });

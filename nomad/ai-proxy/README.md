@@ -58,6 +58,63 @@ urn:pulumi:homelab::pulumi-homelab::nomad:index/job:Job::ai-proxy
 If the local SSH agent socket is unavailable, run Pulumi with
 `env -u SSH_AUTH_SOCK`; the command provider has the explicit private key.
 
+### Recovering the JSON/HCL refresh mismatch
+
+The HCL file remains the source of truth. Pulumi parses it through Nomad's
+read-only job parser and registers the result with `json: true`. This matches
+the API JSON that Nomad may save as a submission after an external update.
+The parser needs the same Nomad connectivity as the job provider.
+
+Older state can contain a JSON `jobspec` with `json: false`. Refresh then fails
+on fields such as `Stop` before the updated program runs. A code-only deploy
+cannot repair that checkpoint. Do not disable refresh globally or recreate
+the running job to work around this.
+
+On an authenticated deployment workstation, with this code checked out and
+no concurrent stack operation, the following repairs **only ai-proxy's state**.
+It copies the last observed JSON jobspec to its recorded inputs and marks both
+inputs and outputs as JSON. The next preview compares that baseline against the
+HCL source; it does not adopt the live job as the new source of truth.
+
+**Obtain approval before importing state.** The export contains plaintext
+secrets: keep the backup private, do not commit or upload it, and retain it
+securely until recovery is verified.
+
+```sh
+set -eu
+umask 077
+repair_dir=$(mktemp -d "${TMPDIR:-/tmp}/ai-proxy-state.XXXXXX")
+stack=raygenrrupe-gmail-com/pulumi-homelab/homelab
+urn='urn:pulumi:homelab::pulumi-homelab::nomad:index/job:Job::ai-proxy'
+pulumi stack export --stack "$stack" --show-secrets --file "$repair_dir/backup.json"
+
+jq --arg urn "$urn" '
+  def unsecret:
+    if type == "object" and .["4dabf18193072939515e22adb298388d"] == "1b47061264138c4ac30d75fd1eb44270"
+    then .value else . end;
+  [.deployment.resources[] | select(.urn == $urn)] as $matches |
+  if ($matches | length) != 1 then error("Expected exactly one ai-proxy resource")
+  elif (($matches[0].outputs.jobspec | unsecret | fromjson | .ID) != "ai-proxy")
+  then error("Expected a bare ai-proxy API JSON jobspec; stop and inspect privately")
+  else .deployment.resources |= map(
+    if .urn == $urn then
+      .inputs.jobspec = .outputs.jobspec |
+      .inputs.json = true |
+      .outputs.json = true
+    else . end)
+  end
+' "$repair_dir/backup.json" > "$repair_dir/repaired.json" &&
+pulumi stack import --stack "$stack" --file "$repair_dir/repaired.json"
+
+pulumi preview --stack "$stack" --refresh
+```
+
+Stop if validation or import fails. Inspect the preview for unexpected changes
+or replacements before authorizing any update. State import itself does not
+register, stop, or restart the Nomad job. To undo only the checkpoint repair,
+import `backup.json` before any subsequent deployment; that also restores the
+original format mismatch.
+
 For database maintenance, apply `replicas=0`, verify that the allocation has
 stopped, and take a consistent backup before running the image's offline
 `/app/dist-server/db-cli.mjs` commands. Never copy just the SQLite main file
