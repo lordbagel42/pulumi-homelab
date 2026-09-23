@@ -89,8 +89,9 @@ stack already holds.
 What that needs is a **Cloudflare API token**, which is a different thing from a
 tunnel token: the connector tokens above authenticate cloudflared and carry no
 API scope at all. The API token lives in Infisical as `CLOUDFLARE_API_TOKEN` at
-secret path `/cloudflare`, and needs only Zone:Read + DNS:Edit on
-`bagelindustries.com`. A missing one fails the deploy at that read rather than
+secret path `/cloudflare`, and needs Zone:Read + DNS:Edit on
+`bagelindustries.com` and `raygen.dev`, plus account-level Access: Apps and
+Policies:Edit for Access-protected hostnames. A missing one fails the deploy at that read rather than
 leaving a hostname silently unresolvable.
 
 Two caveats:
@@ -122,6 +123,7 @@ takes effect if the tunnel is ever switched to local management.
 | `nomad.bagelindustries.com`   | homelab | Nomad UI (202:4646) — **open**   |
 | `panel.bagelindustries.com`   | oracle  | `oracle-pelican` job             |
 | `homeassistant.bagelindustries.com` | homelab | Home Assistant (200:8123) — **unmanaged host** |
+| `proxmox.raygen.dev` | homelab | optiplex (HTTPS 8006) — **Cloudflare Access** |
 
 > **The two cluster UIs are unauthenticated.** Anyone who reaches
 > `consul.` or `nomad.` gets a full admin interface — the Nomad UI can submit
@@ -176,6 +178,46 @@ over the protected host's own rule for that path, on every host.
 
 Note that a protected route needs a matching provider configured inside
 Authentik; the middleware only forwards the auth check.
+
+## Cloudflare Access-protected routes
+
+`tunnelHostname()` accepts `accessEmails: ["raygenrrupe@gmail.com"]` to create
+a self-hosted Access application for that exact hostname. It uses the zone's
+account and existing login methods, an eight-hour session, and a single Allow
+policy containing only the listed email addresses. All other identities are
+denied; there is no bypass policy. Omitting `accessEmails` keeps a route public;
+an empty list is rejected. This is separate from the Authentik `protected` flag.
+
+`external/proxmox` uses this for `proxmox.raygen.dev`. Its Consul service waits
+for both the Access-backed DNS record and the Traefik transport before becoming
+routable, even if wildcard DNS already resolves the hostname. The backend address
+comes from the **LAN** `PROXMOX_ENDPOINT` config (required in CI too), never the
+CI-only NetBird endpoint, and the backend port is HTTPS 8006. Proxmox still
+requires its own login after Cloudflare Access.
+
+Only this route opts into `proxmox@file`, a Traefik transport that accepts the
+host's self-signed certificate. Traffic remains encrypted, but this hop does
+not authenticate the origin certificate; other routes retain TLS verification.
+Replace this exception with a trusted Proxmox CA/certificate when available.
+The router also allows only the cloudflared socket peer (`192.168.0.204`), not
+client-supplied forwarded headers, so direct LAN requests to Traefik cannot
+bypass Access. Direct LAN access to Proxmox itself remains unchanged.
+
+Before deploying:
+
+- Ensure the Cloudflare token has the permissions above, and that the account
+  has a working Access login method (for example Google or one-time PIN).
+- Import any existing explicit `proxmox.raygen.dev` DNS record or matching
+  Access application into Pulumi rather than trying to create a duplicate.
+- Run `pnpm test` and a refreshed `pulumi preview`. The playbook update can
+  reprovision Hashistack services; review its command changes before applying.
+
+After deployment, verify an unauthenticated browser is sent to Access, only
+`raygenrrupe@gmail.com` can proceed to Proxmox, and a Proxmox console WebSocket
+works after login. A direct request to Traefik with `Host: proxmox.raygen.dev`
+must return 403, including with a forged `X-Forwarded-For: 192.168.0.204`.
+For rollback, remove the Consul route first and verify it no longer serves
+Proxmox **before** removing Access or DNS; wildcard DNS may still resolve it.
 
 ## Forwarded headers
 

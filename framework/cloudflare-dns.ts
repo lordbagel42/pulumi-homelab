@@ -37,15 +37,20 @@ export function tunnelId(token: pulumi.Input<string>): pulumi.Output<string> {
 
 // One zone lookup per zone name, shared by every hostname. Without the cache
 // each call would be its own invoke against the Cloudflare API on every preview.
-const zoneIds = new Map<string, pulumi.Output<string>>();
+const zones = new Map<string, pulumi.Output<cloudflare.GetZoneResult>>();
 
-function zoneId(zone: string, provider: cloudflare.Provider): pulumi.Output<string> {
-    let id = zoneIds.get(zone);
-    if (!id) {
-        id = cloudflare.getZoneOutput({ filter: { name: zone } }, { provider }).id;
-        zoneIds.set(zone, id);
+function getZone(zone: string, provider: cloudflare.Provider): pulumi.Output<cloudflare.GetZoneResult> {
+    let result = zones.get(zone);
+    if (!result) {
+        // Invokes do not defer for unknown provider credentials alone. Make
+        // the lookup input unknown too until the token exists, so a first
+        // preview cannot treat an empty provider result as a resolved zone.
+        // Only the public zone name leaves this apply, never the API token.
+        const name = pulumi.unsecret(provider.apiToken.apply(() => zone));
+        result = cloudflare.getZoneOutput({ filter: { name } }, { provider });
+        zones.set(zone, result);
     }
-    return id;
+    return result;
 }
 
 export interface TunnelHostnameArgs {
@@ -56,6 +61,8 @@ export interface TunnelHostnameArgs {
     provider: cloudflare.Provider;
     /** Defaults to ZONE; pass this only for a hostname in another zone. */
     zone?: string;
+    /** When set, require Cloudflare Access and allow only these exact emails. */
+    accessEmails?: string[];
 }
 
 /**
@@ -67,8 +74,30 @@ export interface TunnelHostnameArgs {
  * nothing else. See docs/external-routing.md.
  */
 export function tunnelHostname(name: string, args: TunnelHostnameArgs): cloudflare.DnsRecord {
+    if (args.accessEmails !== undefined && args.accessEmails.length === 0) {
+        throw new Error("Cloudflare Access requires at least one allowed email");
+    }
+    const zone = getZone(args.zone ?? ZONE, args.provider);
+    const access = args.accessEmails === undefined ? undefined : new cloudflare.ZeroTrustAccessApplication(`${name}-access`, {
+        accountId: zone.account.apply(account => account.id),
+        name: args.domain,
+        type: "self_hosted",
+        domain: args.domain,
+        destinations: [{ type: "public", uri: args.domain }],
+        sessionDuration: "8h",
+        httpOnlyCookieAttribute: true,
+        // Use the account's existing login methods. Authentication alone is
+        // not authorization: no Everyone, domain-wide, or bypass policy.
+        policies: [{
+            name: "Allowed emails",
+            decision: "allow",
+            precedence: 1,
+            includes: args.accessEmails.map(email => ({ email: { email } })),
+        }],
+    }, { provider: args.provider });
+
     return new cloudflare.DnsRecord(`${name}-dns`, {
-        zoneId: zoneId(args.zone ?? ZONE, args.provider),
+        zoneId: zone.id,
         name: args.domain,
         type: "CNAME",
         content: pulumi.interpolate`${tunnelId(args.tunnelToken)}.cfargotunnel.com`,
@@ -78,5 +107,5 @@ export function tunnelHostname(name: string, args: TunnelHostnameArgs): cloudfla
         // 1 = automatic, which is the only TTL a proxied record accepts.
         ttl: 1,
         comment: "managed by pulumi-homelab",
-    }, { provider: args.provider });
+    }, { provider: args.provider, dependsOn: access ? [access] : [] });
 }

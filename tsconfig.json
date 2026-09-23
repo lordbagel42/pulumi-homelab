@@ -5,6 +5,7 @@
         "target": "es2020",
         "module": "nodenext",
         "moduleResolution": "nodenext",
+        "types": ["node", "symbol-observable"],
         "sourceMap": true,
         "experimentalDecorators": true,
         "pretty": true,

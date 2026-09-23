@@ -58,8 +58,9 @@ const grafana: GrafanaConfig = {
 
 // DNS for tunnel-backed hostnames. The tunnel tokens elsewhere in this file are
 // connector credentials and carry no API scope, so this is a separate, real API
-// token — it needs Zone:Read plus DNS:Edit on bagelindustries.com and nothing
-// else. readSecret rather than optionalSecret: a missing token should stop the
+// token — it needs Zone:Read plus DNS:Edit on bagelindustries.com and raygen.dev,
+// plus Access: Apps and Policies:Edit for the Proxmox gate.
+// readSecret rather than optionalSecret: a missing token should stop the
 // deploy with the name and path it looked for, not quietly leave a hostname
 // unresolvable.
 const cloudflareInfisicalConfig: InfisicalConfig = { ...infisicalConfig, secretPath: "/cloudflare" };
