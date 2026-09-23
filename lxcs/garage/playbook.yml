@@ -17,7 +17,7 @@
   tasks:
     - name: Install dependencies
       apt:
-        name: [wget, curl, ca-certificates]
+        name: [wget, unzip, curl, ca-certificates]
         state: present
         update_cache: yes
 
