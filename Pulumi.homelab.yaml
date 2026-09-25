@@ -25,7 +25,7 @@ config:
     secure: AAABANWMFvAyGosWuCgyKbZs/Z5vT0AjfBZW9WgoQ3yqdMSyA6WKll7P5vr0mYJ8R/q/uCXugsNbIMVku77OHAlwTeNKbQyRNjYC
   chatgpt-bridge:token:
     secure: AAABAKQ8rI+nl9TGAzG69ttcr9pbFmHi0Ecj+ED/8zlnl34eIpinnAhH8F58i/KZ9afjLtf42WUtq1hPl1s2T2pimrff89DI/GmiaynRW/O1xcMSobbOh0zajrKy1Z66
-  huddle-phone:sshHostKey: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKEe4SS4+UeLGUApCgru2PyWN08OoTI+ZXAss9DhSE6I root@localhost
+  huddle-phone:sshHostKey: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJ6yM7aIrkYryZr3CbcrzwWZf9blGwwr2+sWuOKDEMS/ root@localhost
   chatgpt-bridge:sshHostKey: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPuU5lQjHmJzJqWTYEFy2hUKUctFIBCCzFQpM8m66MVa root@chatgpt-bridge
   phone-voice:enabled: "true"
   phone-voice:tunnelPublicKey: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJPb6k783xdf/OK/lYzwRENGKkcBHdu/aTn/rhLkX1gE codex-phone-control-tunnel
