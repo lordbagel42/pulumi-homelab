@@ -128,7 +128,7 @@
           MemorySwapMax=0
           TasksMax=2048
           OOMPolicy=stop
-          NoNewPrivileges=true
+          NoNewPrivileges=false
           UMask=0077
 
           [Install]
