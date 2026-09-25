@@ -5,7 +5,7 @@ const cloudflare = require("@pulumi/cloudflare");
 const consul = require("@pulumi/consul");
 const { getMonitor } = require("@pulumi/pulumi/runtime/settings");
 
-test("portals deploy with exact-owner Access, verified audience and restricted routing, not privileged agent credentials", async () => {
+test("portals use built-in auth and restricted routing without a Cloudflare Access gate", async () => {
   const resources = new Map();
   const dependencies = new Map();
   await pulumi.runtime.setMocks(
@@ -16,9 +16,6 @@ test("portals deploy with exact-owner Access, verified audience and restricted r
           id: args.name + "-id",
           state: {
             ...args.inputs,
-            ...(args.name === "portals-access" && {
-              aud: "issued-portal-audience",
-            }),
           },
         };
       },
@@ -67,16 +64,12 @@ test("portals deploy with exact-owner Access, verified audience and restricted r
     ]),
   });
   await result.id.promise();
-  const app = resources.get("portals-access").inputs;
-  assert.equal(app.domain, "portals.raygen.dev");
-  assert.deepEqual(app.policies[0].includes, [
-    { email: { email: "raygenrrupe@gmail.com" } },
-  ]);
-  assert.equal(app.policies[0].decision, "allow");
+  assert.equal(resources.has("portals-access"), false);
   const deploy = resources.get("portals-install").inputs;
   const config = JSON.parse(deploy.stdin);
-  assert.equal(config.accessAudience, "issued-portal-audience");
-  assert.equal(config.accessIssuer, "https://bagel.cloudflareaccess.com");
+  assert.equal(config.accessAudience, undefined);
+  assert.equal(config.accessIssuer, undefined);
+  assert.equal(config.allowedEmail, undefined);
   assert.equal(config.workspaceRoot, "/home/amp/workspaces");
   assert.equal(config.port, 4310);
   assert.equal(
@@ -106,10 +99,11 @@ test("portals deploy with exact-owner Access, verified audience and restricted r
         .get("portals-service")
         .some((urn) => urn.endsWith("::" + name)),
     );
-  assert.ok(
+  assert.equal(
     dependencies
       .get("portals-dns")
       .some((urn) => urn.endsWith("::portals-access")),
+    false,
   );
   assert.equal(resources.has("oracle-setup"), false);
   assert.equal(

@@ -48,27 +48,6 @@ export function register(ctx: ServiceContext): consul.Service {
     }
     return expected;
   });
-  const access = new cloudflare.ZeroTrustAccessApplication(
-    "portals-access",
-    {
-      accountId: zone.account.apply((a) => a.id),
-      name: "Raygen portals",
-      domain: "portals.raygen.dev",
-      destinations: [{ type: "public", uri: "portals.raygen.dev" }],
-      type: "self_hosted",
-      sessionDuration: "8h",
-      httpOnlyCookieAttribute: true,
-      policies: [
-        {
-          name: "Raygen only",
-          decision: "allow",
-          precedence: 1,
-          includes: [{ email: { email: "raygenrrupe@gmail.com" } }],
-        },
-      ],
-    },
-    { provider: cf },
-  );
   const dns = new cloudflare.DnsRecord(
     "portals-dns",
     {
@@ -80,7 +59,7 @@ export function register(ctx: ServiceContext): consul.Service {
       ttl: 1,
       comment: "managed by pulumi-homelab",
     },
-    { provider: cf, dependsOn: [access] },
+    { provider: cf },
   );
 
   const connection = {
@@ -110,20 +89,15 @@ export function register(ctx: ServiceContext): consul.Service {
     },
     { dependsOn: ctx.commands.get("amp-runner-setup") },
   );
-  const config = access.aud.apply((audience) =>
-    JSON.stringify({
-      stateDir: "/var/lib/raygen-portals",
-      socketPath: "/run/raygen-portals/control.sock",
-      bindHost: "192.168.0.214",
-      port: 4310,
-      workspaceRoot: "/home/amp/workspaces",
-      domain: "raygen.dev",
-      loginHost: "portals.raygen.dev",
-      accessIssuer: "https://bagel.cloudflareaccess.com",
-      accessAudience: audience,
-      allowedEmail: "raygenrrupe@gmail.com",
-    }),
-  );
+  const config = JSON.stringify({
+    stateDir: "/var/lib/raygen-portals",
+    socketPath: "/run/raygen-portals/control.sock",
+    bindHost: "192.168.0.214",
+    port: 4310,
+    workspaceRoot: "/home/amp/workspaces",
+    domain: "raygen.dev",
+    loginHost: "portals.raygen.dev",
+  });
   const script = fs
     .readFileSync(path.join(directory, "install.sh"), "utf8")
     .replace(/__RELEASE_SHA__/g, digest);
