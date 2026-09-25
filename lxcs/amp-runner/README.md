@@ -26,8 +26,10 @@ the host kernel and is not a security boundary for hostile code.
 
 The provisioning playbook installs Amp from its official installer, Git, GitHub
 CLI, Debian's Node.js/npm, pnpm 10.33.0, Python/venv, build tools, and common CLI
-utilities. It does not copy desktop credentials, configure GitHub credentials,
-or grant the runner sudo access.
+utilities. It does not copy desktop credentials or configure GitHub credentials.
+The `amp` account has passwordless sudo for all commands inside the container;
+agents running under this account can therefore execute commands as root.
+Password login remains locked; use SSH-key authentication.
 
 SSH uses the public key in `proxmox-pulumi.pub`. Sign in as `amp` using its
 matching private key:

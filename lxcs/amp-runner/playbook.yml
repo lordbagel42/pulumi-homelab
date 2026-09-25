@@ -28,12 +28,22 @@
         update_cache: true
         cache_valid_time: 3600
 
-    - name: Create the unprivileged runner account
+    - name: Create the runner account
       ansible.builtin.user:
         name: amp
         shell: /bin/bash
         create_home: true
         password_lock: true
+
+    - name: Allow passwordless sudo for the runner account
+      ansible.builtin.copy:
+        dest: /etc/sudoers.d/amp
+        owner: root
+        group: root
+        mode: "0440"
+        content: |
+          amp ALL=(ALL:ALL) NOPASSWD: ALL
+        validate: /usr/sbin/visudo -cf %s
 
     - name: Create private runner directories
       ansible.builtin.file:
