@@ -61,6 +61,32 @@
         - /home/amp/.local/share/amp
         - /home/amp/workspaces
 
+    - name: Create the Amp configuration directory
+      ansible.builtin.file:
+        path: /home/amp/.config/amp
+        state: directory
+        owner: amp
+        group: amp
+        mode: "0700"
+
+    - name: Document the runner preview portal tool
+      ansible.builtin.blockinfile:
+        path: /home/amp/.config/amp/AGENTS.md
+        create: true
+        owner: amp
+        group: amp
+        mode: "0600"
+        marker: "<!-- {mark} managed runner portal guidance -->"
+        block: |
+          ## Private HTTPS previews
+
+          - Use the `raygen_portal` tool to share web previews from this runner. `start` takes a stable thread-local name, an absolute workspace `cwd`, and a foreground command listening on `$PORT`; `$PUBLIC_URL` and the exact Vite allowed host are supplied. Use `expose` for an existing loopback HTTP server. Do not expose admin services or arbitrary LAN hosts.
+          - Check `status` and wait for `ready` before sharing the ordinary HTTPS `url`. Identical `start`/`expose` calls renew a 24-hour lease and reuse the URL; changed definitions require `stop` then `start`. Use `list`, `logs`, and `restart` for inspection and recovery. Leave previews requested by the user running; stop only your own disposable previews.
+          - Previews use built-in PIN authentication, not Cloudflare Access. The shared PIN is six digits; an optional secret `pin` on `start`/`expose` sets a portal-specific override (6–12 digits). Omit it to use the shared PIN for a new portal or preserve an existing portal's PIN. Never put PINs in URLs, commands, logs, or Git.
+          - `login-url` returns a sensitive, single-use, 60-second login URL for authorized curl/headless-browser checks. Do not share it publicly; give people the ordinary URL with the PIN screen instead. Keep login URLs, cookies, and authentication state out of logs and Git.
+          - The owner's shared-PIN recovery copy is `/etc/raygen-portals/shared-pin-recovery` (root-only). Read it only when needed for an authorized recovery or login, and do not echo it into tool output. If rotating the shared PIN, update the recovery copy too; the daemon does not maintain that backup.
+          - This is a runner preview service, not Amp's native Portal tab, annotations, or multiplayer. If the tool is missing, load `/home/amp/.config/amp/plugins/raygen-portals.js` with `load_plugin`. Operations and deployment documentation are in `pulumi-homelab/external/portals/README.md`; the service is `raygen-portals`. Do not restart the Amp runner to manage previews.
+
     - name: Allow the provisioning SSH key to log in as amp
       ansible.builtin.copy:
         remote_src: true
