@@ -26,7 +26,8 @@ export function register(ctx: ServiceContext): void {
       swap: 0,
       disk: 96,
       nesting: true,
-      privileged: false,
+      // Match the existing LXC; changing its privilege mode forces replacement.
+      privileged: true,
       tags: ["ai", "development"],
       sshKeys: [ctx.sshKey],
       password: ctx.vmPassword,
