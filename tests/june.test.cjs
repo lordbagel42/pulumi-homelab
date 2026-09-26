@@ -171,6 +171,7 @@ test("June gates enrollment and provisions only a protected private LXC from a s
             executable: "/opt/june/current/node_modules/.bin/codex",
         },
         coding: { enabled: false },
+        console: { origin: "http://127.0.0.1:3080" },
     });
 
     const juneTypes = resources.map((resource) => resource.type);
@@ -455,6 +456,7 @@ runtime = {
     "owner": {"id": "raygen", "identities": [{"channel": "slack", "accountId": "TWORKSPACE", "senderId": "UOWNER"}]},
     "model": {"protocol": "codex", "model": "gpt-6-astra", "home": "/var/lib/june/.codex", "executable": "/opt/june/current/node_modules/.bin/codex"},
     "coding": {"enabled": False},
+    "console": {"origin": "http://127.0.0.1:3080"},
     "slack": {"teamId": "TWORKSPACE", "botUserId": "UBOT", "signingSecretEnv": "SLACK_SIGNING_SECRET", "botTokenEnv": "SLACK_BOT_TOKEN"},
 }
 payload = {
@@ -483,6 +485,20 @@ except ValueError:
     pass
 else:
     raise AssertionError("mismatched owner accepted")
+for console in (None, {"origin": "https://june-slack.bagelindustries.com"}, {"origin": "http://localhost:3080"}):
+    bad = copy.deepcopy(payload)
+    bad_runtime = copy.deepcopy(runtime)
+    if console is None:
+        del bad_runtime["console"]
+    else:
+        bad_runtime["console"] = console
+    bad["config"] = json.dumps(bad_runtime)
+    try:
+        module.validate_payload(bad)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("missing or changed private console origin accepted")
 module.CONFIG = root / "etc/june/config.json"
 module.CREDENTIALS = root / "etc/june/credentials"
 module.SERVICE = root / "etc/systemd/system/june.service"

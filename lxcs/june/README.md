@@ -7,8 +7,10 @@ June runs in a dedicated, persistent, unprivileged Debian LXC on **optiplex**:
 - start on boot and Pulumi deletion protection
 - Node.js **24.21.0** and pnpm **10.33.0**
 
-The service listens on `http://192.168.0.215:3080`. Slack DMs and native reactions
-are live. Consul/Traefik and the existing Cloudflare tunnel route only POST to
+The service listens on `http://192.168.0.215:3080`. Slack messaging and native
+reaction support are configured, but genuine owner-DM processing and replies
+have not yet been demonstrated. Consul/Traefik and the existing Cloudflare tunnel
+route only POST to
 `https://june-slack.bagelindustries.com/webhooks/slack`; June verifies each request's
 Slack signature. GET, `/health`, `/operator/*`, and the Rivet engine/peer/metrics
 ports remain private. Do not use `june.bagelindustries.com`: that hostname already
@@ -20,31 +22,40 @@ adapters or public ingress. WhatsApp and native coding remain disabled.
 ## Source artifact
 
 The reviewed public source snapshot is stored at `lxcs/june/source.tar.gz`, so
-deployment does not depend on an absolute path on a particular runner. June's
-source checkout is still unpushed, not a release that can be cloned on the
-container. Build replacement archives from the checkout that owns the source.
+deployment does not depend on an absolute path on a particular runner. It is the
+already-running private console release from
+[source commit 9294216](https://github.com/lordbagel42/agent/commit/9294216368d722d4377aea146a4a59136a31ba9e),
+with archive SHA-256
+`9605a7a13c4bd586597aadd13f0bad8e733ce1fe4386e39d598647b0e229b681`.
+Keep these exact archive bytes for this release; the newer integrated source is
+not selected until journal downgrade safety and its rollout are reviewed.
 The archive root may contain only `.node-version`, `.npmrc`,
 `package.json`, `pnpm-lock.yaml`, `pnpm-workspace.yaml`, `tsconfig.json`, and
 `src/`; the first two files are optional. Symlinks, credentials, generated data,
 and `node_modules` are rejected.
 
-From this repository root, rebuild the snapshot from the current local checkout:
+For a future approved release, build from its reviewed commit, not a checkout's
+possibly dirty working files. From this repository root, set
+`JUNE_SOURCE_CHECKOUT` to a checkout of `lordbagel42/agent` and
+`JUNE_SOURCE_COMMIT` to the full reviewed commit hash, then:
 
 ```sh
-archive=lxcs/june/source.tar.gz
-tar --create --gzip --file "$archive" \
-  --directory /home/amp/workspaces/agent \
-  --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner \
-  --exclude='*.test.ts' \
+set -eu
+: "${JUNE_SOURCE_CHECKOUT:?Set the reviewed source checkout path}"
+: "${JUNE_SOURCE_COMMIT:?Set the full reviewed source commit hash}"
+archive="$PWD/lxcs/june/source.tar.gz"
+git -C "$JUNE_SOURCE_CHECKOUT" archive --format=tar.gz --output="$archive" \
+  "$JUNE_SOURCE_COMMIT" -- \
   .node-version .npmrc package.json pnpm-lock.yaml pnpm-workspace.yaml \
-  tsconfig.json src
+  tsconfig.json src ':(exclude,glob)src/**/*.test.ts'
 python3 lxcs/june/provision.py --validate-source-archive "$archive"
 sha256sum "$archive"
 ```
 
-The provisioner derives the release identity from the actual archive bytes. An
-optional `june:sourceArchiveSha256` config value can pin the reviewed digest and
-makes a mismatch fail during preview.
+Repacking a commit can change the archive digest; review the new artifact rather
+than treating it as the existing release. The provisioner derives the release
+identity from the actual archive bytes. An optional `june:sourceArchiveSha256`
+config value can pin the reviewed digest and makes a mismatch fail during preview.
 
 ## Bootstrap and SSH enrollment
 
@@ -99,7 +110,19 @@ The generated config owns the LAN listener and identifies the owner as `raygen`,
 with the configured Slack identity or no identities in setup mode. It selects
 Codex model `gpt-6-astra`, uses
 `/var/lib/june/.codex` and the release's pinned Codex executable, and keeps native
-coding disabled.
+coding disabled. The read-only console uses the fixed origin
+`http://127.0.0.1:3080`; it adds no public route or operator mutation authority.
+
+On the operator's computer, use the existing enrolled SSH identity and pinned
+host key to forward the private listener:
+
+```sh
+ssh -N -o ExitOnForwardFailure=yes -o StrictHostKeyChecking=yes \
+  -L 127.0.0.1:3080:192.168.0.215:3080 root@192.168.0.215
+```
+
+Open `http://127.0.0.1:3080/console/session/login` on that computer and use the
+existing operator token. Never paste it into Git, messages, or general logs.
 
 ## Runtime and updates
 
@@ -133,6 +156,11 @@ return `{"name":"June","ready":true}`. If that fails, it restores the former
 link, config, credential file, and service, then restarts the former release.
 Failed and previous release directories are retained; persistent state and Codex
 login are never removed.
+
+Before an update, quiesce June and take a coherent state/config backup. A
+code/config rollback does not rewind durable state: establish that the former
+release can read journals written by the candidate before relying on rollback.
+Never blindly restore stale state or resend effects with an unknown outcome.
 
 Inspect operation on the LAN:
 
@@ -170,6 +198,11 @@ June's runtime stays self-hosted rather than moving to Slack-hosted compute.
 The bot token and signing secret use encrypted stack keys `june:slackBotToken`
 and `june:slackSigningSecret`. Slack configuration disables setup mode and creates
 the narrowly scoped webhook ingress. Preview the `all` phase when adding it.
+
+Manifest configuration does not prove operational Events API enablement or URL
+verification. In an authorized App Management session, inspect Enable Events and
+verify the same webhook URL, then save. A real Slack challenge and verified UI
+result establish URL verification; an agent-generated challenge does not.
 
 Search is disabled. The app's updated manifest requests bot `search:read.public`
 and user `search:read.public`, `search:read.private`, and `search:read.im`; admin

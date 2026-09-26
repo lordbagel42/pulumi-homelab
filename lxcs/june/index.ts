@@ -24,6 +24,7 @@ const juneConfig = {
         executable: "/opt/june/current/node_modules/.bin/codex",
     },
     coding: { enabled: false },
+    console: { origin: "http://127.0.0.1:3080" },
 };
 
 function readSourceArchive(config: pulumi.Config): { archive: string; revision: string } {

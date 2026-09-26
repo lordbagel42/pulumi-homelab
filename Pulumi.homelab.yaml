@@ -47,7 +47,7 @@ config:
   june:enabled: "true"
   june:sshHostKey: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKMleDIvdMlNClOu0GIe+kX5XMHMKCcXIHMO57oX8ctR root@june
   june:sourceArchive: lxcs/june/source.tar.gz
-  june:sourceArchiveSha256: ef42b8433433663b172ef91051af0d970720a52a0cfb9450cc00ecc2292dc5f5
+  june:sourceArchiveSha256: 9605a7a13c4bd586597aadd13f0bad8e733ce1fe4386e39d598647b0e229b681
   june:slackBotToken:
     secure: AAABAPIX6j2rDIdLCRuEFOXjOp8SgWYyxCm6SKi9IXYI0+Bozxxuj5lPrL35NGQNnzFsL/bZJYiQt6JIb/oRP/4tkNsfIDMB+cLmtiDYXzQp86BcTSfYH5i1
   june:slackSigningSecret:

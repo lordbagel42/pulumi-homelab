@@ -476,6 +476,7 @@ def validate_payload(payload):
             "executable": "/opt/june/current/node_modules/.bin/codex",
         },
         "coding": {"enabled": False},
+        "console": {"origin": "http://127.0.0.1:3080"},
     }
     slack = payload.get("slack")
     if slack is not None:
