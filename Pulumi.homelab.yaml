@@ -40,3 +40,16 @@ config:
   phone-platform:phoneToken:
     secure: AAABAEbrTgro29QfhJMQouV+qz6PJsEeUqN9SPXxFkopBxLW4LAISGGsBszSSvZfMgI7HZH4JZ36INHhMXOJloBDLAbOzDYlDU2xBYVZDocZK5SZBYyZkGAmh3snWLt6
   phone-platform:enabled: "true"
+  june:rootPassword:
+    secure: AAABAHkUPXSqzwq8zNpyUouGcR7U3iUBGPckW3uWYAslG90jfHEkmLrefNh0cDvJRkyzXYAsuBBxPkaz2EECDjH7AqWsZwwo41z4XU3YZrt+ULA7Wxf0U6FweYCUTD+n
+  june:operatorToken:
+    secure: AAABAIZX1zoLbzW1lO2x2/x5+oQ1Me5KOsOhB+t8hDgSL/K3fAZm1CYaQ+wKnPtFNF3/YgW157dfVEsVaYBZQFRmi9or0vn3NobFs0huc5uBNfPQGicJeJNr1F3at8Ij
+  june:enabled: "true"
+  june:sshHostKey: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKMleDIvdMlNClOu0GIe+kX5XMHMKCcXIHMO57oX8ctR root@june
+  june:sourceArchive: lxcs/june/source.tar.gz
+  june:sourceArchiveSha256: ef42b8433433663b172ef91051af0d970720a52a0cfb9450cc00ecc2292dc5f5
+  june:slackBotToken:
+    secure: AAABAPIX6j2rDIdLCRuEFOXjOp8SgWYyxCm6SKi9IXYI0+Bozxxuj5lPrL35NGQNnzFsL/bZJYiQt6JIb/oRP/4tkNsfIDMB+cLmtiDYXzQp86BcTSfYH5i1
+  june:slackSigningSecret:
+    secure: AAABALdYA4VUJzaRMZH/vSEQMn0Iem7rSO5Q15KnEZ5TO4GYqhrUYhlNU8Sgfx4lxQUlYMCePWS4kKZqpM+LPA==
+  june:slack: '{"teamId": "T0266FRGM", "botUserId": "U0C4G9MD5HR", "ownerUserId": "U08R4KDL6UF"}'
