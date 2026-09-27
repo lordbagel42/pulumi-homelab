@@ -122,7 +122,7 @@ test("June gates enrollment and provisions only a protected private LXC from a s
     assert.equal(container.inputs.vmId, 215);
     assert.deepEqual(container.inputs.cpu, { cores: 2 });
     assert.deepEqual(container.inputs.memory, { dedicated: 2048 });
-    assert.deepEqual(container.inputs.disk, { datastoreId: "local-lvm", size: 12 });
+    assert.deepEqual(container.inputs.disk, { datastoreId: "local-lvm", size: 32 });
     assert.equal(container.inputs.unprivileged, true);
     const initialization = unwrapSecret(container.inputs.initialization);
     assert.notEqual(initialization, container.inputs.initialization, "the root password must taint initialization as secret");
