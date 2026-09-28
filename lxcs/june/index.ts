@@ -77,7 +77,7 @@ export function register(ctx: ServiceContext): void {
         ip: address,
         cpu: 2,
         memory: 2048,
-        disk: 32,
+        disk: 96,
         // Debian systemd hardening and Rivet's child process need mount and PID
         // namespaces while the container itself remains unprivileged.
         nesting: true,

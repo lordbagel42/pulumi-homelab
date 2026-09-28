@@ -3,7 +3,7 @@
 June runs in a dedicated, persistent, unprivileged Debian LXC on **optiplex**:
 
 - VMID **215**, `192.168.0.215/16`
-- **2** CPU cores, **2048 MiB** RAM, **32 GiB** `local-lvm` disk
+- **2** CPU cores, **2048 MiB** RAM, **96 GiB** `local-lvm` disk
 - start on boot and Pulumi deletion protection
 - Node.js **24.21.0** and pnpm **10.33.0**
 
