@@ -24,7 +24,7 @@ export function register(ctx: ServiceContext): void {
       cpuUnits: 25,
       memory: 12288,
       swap: 0,
-      disk: 96,
+      disk: 160,
       nesting: true,
       // Match the existing LXC; changing its privilege mode forces replacement.
       privileged: true,

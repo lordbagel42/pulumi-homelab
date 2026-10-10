@@ -6,7 +6,7 @@ removed `sandbox-next` LXC 232 and its Claude/MCP gateway services.
 ## Capacity and limits
 
 - **3 CPU cores**, hard quota **3**, CPU weight **25** (normal cgroup v2 weight is 100).
-- **12 GiB RAM**, **no swap**, **96 GiB disk** on `local-lvm`.
+- **12 GiB RAM**, **no swap**, **160 GiB disk** on `local-lvm`.
 - Amp and its subprocesses: memory reclaim above **10 GiB**, hard **11 GiB**
   limit, **2,048 tasks**, nice **10**, low-priority disk I/O.
 - Starts on boot; Pulumi protects the container from accidental deletion.
