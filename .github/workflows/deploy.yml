@@ -97,11 +97,6 @@ jobs:
         with:
           command: up
           stack-name: homelab
-          # Inspiron/PBS is offline. Keep its resources managed but untouched;
-          # remove these exclusions only after an explicit recovery preview.
-          exclude: |
-            urn:pulumi:homelab::pulumi-homelab::**::pbs-*
-            urn:pulumi:homelab::pulumi-homelab::**::proxmox-backup-server
           # Reconcile state against reality before updating. Consul service
           # registrations in particular get lost out of band (an agent restart
           # dropped the authentik service while Pulumi still believed it

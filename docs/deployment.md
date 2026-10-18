@@ -2,16 +2,15 @@
 
 Pushes to `main` run `.github/workflows/deploy.yml`. Lint must pass before the
 hosted runner joins Netbird and runs Pulumi with refresh enabled. Preview uses
-the same resource exclusions and artifact preparation as deployment.
+the same full-stack scope and artifact preparation as deployment.
 
-## Offline backup server
+## Backup server
 
-Inspiron is offline. CI explicitly excludes `pbs-*` and
-`proxmox-backup-server` resources from both refresh and update. Their definitions
-and state remain intact; CI success does **not** mean backups are healthy. Do not
-disable refresh globally or remove these resources to work around the outage.
-After Inspiron is recovered, review a PBS-scoped refresh/preview before removing
-the exclusions from both workflows.
+Inspiron and PBS VM 100 were verified online on October 18, 2026. A PBS-scoped
+refresh/preview showed no VM or disk changes, so the temporary `pbs-*` and
+`proxmox-backup-server` exclusions were removed from both workflows. PBS is
+managed and refreshed normally again. A running VM or successful infrastructure
+deployment does not prove that scheduled backups have completed successfully.
 
 ## Application ownership and immutable inputs
 

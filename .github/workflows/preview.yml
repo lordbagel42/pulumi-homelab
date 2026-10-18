@@ -97,10 +97,6 @@ jobs:
         with:
           command: preview
           stack-name: homelab
-          # Match the explicit offline PBS scope in deploy.yml.
-          exclude: |
-            urn:pulumi:homelab::pulumi-homelab::**::pbs-*
-            urn:pulumi:homelab::pulumi-homelab::**::proxmox-backup-server
           # Match deploy.yml so the plan reflects real drift, not stale state.
           refresh: true
           comment-on-pr: true
