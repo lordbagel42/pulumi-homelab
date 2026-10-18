@@ -15,6 +15,11 @@ the exclusions from both workflows.
 
 ## Application ownership and immutable inputs
 
+- AI-proxy is retired. Removing its Nomad job stops its allocations and route;
+  its command resources have no delete actions. The SQLite data at
+  `/opt/nomad/volumes/ai_proxy_data`, credentials at `/etc/ai-proxy`, host-volume
+  configuration, and Infisical `/ai-proxy` secrets are retained for recovery.
+  No old Worker or database copy should be reactivated automatically.
 - June's container and ingress remain managed here (LXC 215, 4 GiB RAM, 96 GiB
   disk; Slack uses the deployment responder on port 3083). Its application
   controller owns releases, runtime credentials and systemd. The obsolete

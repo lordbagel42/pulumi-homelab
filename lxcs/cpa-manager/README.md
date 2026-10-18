@@ -75,11 +75,9 @@ urn:pulumi:homelab::pulumi-homelab::homelab:framework:ProxmoxMachine$consul:inde
 ```
 
 Use each as a quoted `--target`; do not target the whole stack or dependents.
-The October 18 deployment needed a private `--config-file` copy with
-`ai-proxy:enabled=false` because that unrelated module hashes an undefined output
-during targeted updates. This temporary override does not disable the running
-AI proxy when using only the exact CPA targets above. The real stack config
-retains AI proxy enabled; do not use that temporary config for a full-stack apply.
+The initial October 18 deployment needed a private config override for the
+unrelated AI-proxy module. That service has since been retired; the override is
+no longer needed. Use the current stack config.
 
 Checks inside the guest:
 

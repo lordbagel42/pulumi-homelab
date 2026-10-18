@@ -1,17 +1,12 @@
 environment:
   - default/homelab
 config:
-  ai-proxy:enabled: "true"
-  ai-proxy:sshHostKey: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAICKu8R0MF7Ord31qJPrzygHfwRf1frLzUgOzdTe62BUC root@localhost
   huddle-phone:enabled: "true"
   huddle-phone:dryRun: "false"
   huddle-phone:workspace: hackclub.enterprise
   huddle-phone:teamId: T0266FRGM
   huddle-phone:enterpriseId: E09V59WQY1E
   huddle-phone:channelId: C08T6CY7S10
-  ai-proxy:image: ai-proxy:proxmox-77deb4b95f4b
-  ai-proxy:replicas: "1"
-  ai-proxy:servingEnabled: "true"
   bambu-api:enabled: "true"
   bambu-api:sshHostKey: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAICKu8R0MF7Ord31qJPrzygHfwRf1frLzUgOzdTe62BUC root@localhost
   bambu-api:image: bambu-api:b98deb4
