@@ -118,6 +118,7 @@ takes effect if the tunnel is ever switched to local management.
 | `auth.bagelindustries.com`    | homelab | authentik (220:9000)             |
 | `demo.bagelindustries.com`    | homelab | `demo` job — Authentik-protected |
 | `lookout.raygen.dev`          | homelab | `lookout` job                    |
+| `bambuapi.raygen.dev`         | homelab | `bambu-api` job                  |
 | `hellonomad.raygen.dev`       | homelab | `hello-world` job (smoke test)   |
 | `consul.bagelindustries.com`  | homelab | Consul UI (201:8500) — **open**  |
 | `nomad.bagelindustries.com`   | homelab | Nomad UI (202:4646) — **open**   |
