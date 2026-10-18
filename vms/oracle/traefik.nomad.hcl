@@ -3,7 +3,8 @@ job "oracle-traefik" {
   type        = "service"
 
   group "traefik" {
-    count = 1
+    # Disabled until Oracle workloads are explicitly re-enabled.
+    count = 0
 
     task "traefik" {
       driver = "docker"

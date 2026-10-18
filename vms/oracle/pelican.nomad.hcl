@@ -3,7 +3,8 @@ job "oracle-pelican" {
   type        = "service"
 
   group "pelican" {
-    count = 1
+    # Disabled until Oracle workloads are explicitly re-enabled.
+    count = 0
 
     network {
       mode = "bridge"
@@ -70,11 +71,11 @@ job "oracle-pelican" {
       }
 
       env {
-        APP_URL      = "https://panel.bagelindustries.com"
-        APP_ENV      = "production"
-        APP_KEY      = "__APP_KEY__"
-        APP_DEBUG    = "false"
-        BEHIND_PROXY = "true"
+        APP_URL          = "https://panel.bagelindustries.com"
+        APP_ENV          = "production"
+        APP_KEY          = "__APP_KEY__"
+        APP_DEBUG        = "false"
+        BEHIND_PROXY     = "true"
         XDG_DATA_HOME    = "/pelican-data"
         DB_CONNECTION    = "mysql"
         DB_HOST          = "127.0.0.1"

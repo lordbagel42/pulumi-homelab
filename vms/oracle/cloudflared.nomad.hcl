@@ -3,7 +3,8 @@ job "oracle-cloudflared" {
   type        = "service"
 
   group "cloudflared" {
-    count = 1
+    # Disabled until Oracle workloads are explicitly re-enabled.
+    count = 0
 
     task "cloudflared" {
       driver = "docker"
