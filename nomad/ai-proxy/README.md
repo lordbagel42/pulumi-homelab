@@ -21,12 +21,11 @@ Pulumi configuration uses the `ai-proxy` namespace:
 | `enabled` | Register storage and, when an image is set, the application. |
 | `sshHostKey` | VM230's SSH host public key, verified through Proxmox. |
 | `image` | Unique revision tag or immutable image digest. |
-| `environment` | **Secret:** complete production dotenv file. |
 | `replicas` | `0` for offline maintenance, `1` for the application. |
 | `servingEnabled` | `false` for standby; `true` only for the sole active copy. |
 
-Set `environment` through stdin from a restricted file, never through a
-literal command-line value. It must preserve the original `BETTER_AUTH_SECRET`,
+The complete production dotenv file is the Infisical secret
+`AI_PROXY_ENVIRONMENT` (`prod`, `/ai-proxy`), not Pulumi config. It must preserve the original `BETTER_AUTH_SECRET`,
 `HACKCLUB_CLIENT_ID`, `HACKCLUB_CLIENT_SECRET`, `CODEX_TOKEN_KEY`, and owner
 identity. Process variables in the job override the file's standby setting.
 The environment revision triggers a restart when configuration changes.

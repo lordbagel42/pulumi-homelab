@@ -21,7 +21,9 @@ test("ai-proxy submits parser JSON in JSON mode, retaining typed variables and s
     await pulumi.runtime.setMocks({
         newResource(args) {
             resources.set(args.name, args.inputs);
-            return { id: `${args.name}-id`, state: args.inputs };
+            // The dotenv file is read from Infisical by a local command.
+            const state = args.name === "read-secret-AI_PROXY_ENVIRONMENT" ? { ...args.inputs, stdout: "abc" } : args.inputs;
+            return { id: `${args.name}-id`, state };
         },
         call(args) {
             calls.push(args);
@@ -38,11 +40,11 @@ test("ai-proxy submits parser JSON in JSON mode, retaining typed variables and s
             "ai-proxy:enabled": "true",
             "ai-proxy:sshHostKey": "test-host-key",
             "ai-proxy:image": "registry.example/ai-proxy:revision-123",
-            "ai-proxy:environment": "abc",
             "ai-proxy:replicas": String(replicas),
             "ai-proxy:servingEnabled": String(servingEnabled),
-        }, ["ai-proxy:environment"]);
-        const ctx = { nomadProvider: provider, sshPrivateKey: pulumi.secret("test-key"), commands: new Map() };
+        });
+        const infisicalConfig = { clientId: "id", clientSecret: "secret", projectId: "project", environment: "prod", secretPath: "/" };
+        const ctx = { nomadProvider: provider, infisicalConfig, sshPrivateKey: pulumi.secret("test-key"), commands: new Map() };
         register(ctx);
         const job = ctx.commands.get("ai-proxy-deploy");
         await job.id.promise();

@@ -34,4 +34,4 @@ jobs:
         run: sudo apt-get install -y shellcheck
 
       - name: Lint shell scripts
-        run: find lxcs vms -name "*.sh" | xargs shellcheck --severity=warning
+        run: find lxcs vms -name "*.sh" -print0 | xargs -0 shellcheck --severity=warning

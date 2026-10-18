@@ -1,0 +1,15 @@
+diff --git a/codex-rs/core/src/realtime_conversation.rs b/codex-rs/core/src/realtime_conversation.rs
+--- a/codex-rs/core/src/realtime_conversation.rs
++++ b/codex-rs/core/src/realtime_conversation.rs
+@@ -141,8 +141,10 @@ struct RealtimeHandoffAdmission {
+ impl RealtimeHandoffAdmission {
+     fn new() -> Self {
+         Self {
+             gate: Semaphore::new(1),
+-            retired: AtomicBool::new(false),
++            // Phone speech-only build: neither backend handoffs nor transcript
++            // tails may start or steer a backing Codex agent turn.
++            retired: AtomicBool::new(true),
+         }
+     }
+ 

@@ -15,8 +15,10 @@ INTEGRATIONS = [
     ("home-assistant", "Home Assistant", "app", True, {}),
     ("whisper", "Whisper", "stt", True, {"model": "base.en", "language": "en"}),
     ("elevenlabs-stt", "ElevenLabs Scribe", "stt", False, {"model_id": "scribe_v2", "language": "en"}),
+    ("codex-stt", "Codex recognition (experimental)", "stt", False, {}),
     ("piper", "Piper", "tts", True, {"voice": "en_US-lessac-medium"}),
     ("elevenlabs-tts", "ElevenLabs Voice", "tts", False, {"model_id": "eleven_multilingual_v2", "voice_id": ""}),
+    ("codex-tts", "Codex speech (non-verbatim)", "tts", False, {"voice": "cove", "allow_non_verbatim": False}),
 ]
 ROUTES = [
     {"id": "codex", "name": "Talk to Amp", "extension": "611", "integration": "amp", "stt": "default", "tts": "default", "enabled": True},

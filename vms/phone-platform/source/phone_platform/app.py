@@ -13,29 +13,47 @@ import re
 import secrets
 import time
 import uuid
+import xml.etree.ElementTree as ET
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Literal
 from urllib.parse import urlencode, urlsplit
-import xml.etree.ElementTree as ET
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import httpx
-from fastapi import FastAPI, Request, Response, HTTPException, UploadFile, File, Form, WebSocket
+from fastapi import (
+    FastAPI,
+    File,
+    Form,
+    HTTPException,
+    Request,
+    Response,
+    UploadFile,
+    WebSocket,
+)
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import FileResponse, JSONResponse, HTMLResponse, StreamingResponse
+from fastapi.responses import (
+    FileResponse,
+    HTMLResponse,
+    JSONResponse,
+    StreamingResponse,
+)
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field
 
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
-from .attention import DEFAULT_QUIET, is_quiet
 from . import __version__
+from .attention import DEFAULT_QUIET, is_quiet
+from .calls import PREFIX as CALLS_PREFIX
+from .calls import Calls
 from .config import Config
-from .connectors import CodexConnector, HuddleConnector, ConnectorError
-from .speech import Speech, SpeechError, pcm_wav, telephone_wav
-from .store import Store, ROUTES
-from .speech_engine import SpeechEngine, PROVIDER as ENGINE_PROVIDER, validate_config as validate_engine_config
-from .speech_engine_media import AudioSocketServer
+from .connectors import CodexConnector, ConnectorError, HuddleConnector
 from .operator_profiles import OperatorProfile
+from .speech import Speech, SpeechError, pcm_wav, telephone_wav
+from .speech_engine import PROVIDER as ENGINE_PROVIDER
+from .speech_engine import SpeechEngine
+from .speech_engine import validate_config as validate_engine_config
+from .speech_engine_media import AudioSocketServer
+from .store import ROUTES, Store
 
 LOG = logging.getLogger("switchboard")
 API = "/api/v1"
@@ -96,8 +114,8 @@ class IntegrationUpdate(Model):
 
 class Settings(Model):
     name: str | None = Field(default=None, min_length=1, max_length=80)
-    default_stt: Literal["whisper", "elevenlabs-stt"] | None = None
-    default_tts: Literal["piper", "elevenlabs-tts"] | None = None
+    default_stt: Literal["whisper", "elevenlabs-stt", "codex-stt"] | None = None
+    default_tts: Literal["piper", "elevenlabs-tts", "codex-tts"] | None = None
     default_host: Literal["proxmox", "workstation"] | None = None
 
 
@@ -117,8 +135,8 @@ class Route(Model):
     name: str = Field(min_length=1, max_length=80)
     extension: str = Field(pattern=r"^\d{1,8}$")
     integration: Literal["amp", "codex", "slack-huddles", "home-assistant"]
-    stt: Literal["default", "whisper", "elevenlabs-stt"] = "default"
-    tts: Literal["default", "piper", "elevenlabs-tts"] = "default"
+    stt: Literal["default", "whisper", "elevenlabs-stt", "codex-stt"] = "default"
+    tts: Literal["default", "piper", "elevenlabs-tts", "codex-tts"] = "default"
     enabled: bool = True
     speech_mode: Literal["legacy", "speech-engine"] = "legacy"
     speech_engine: OperatorProfile = Field(default_factory=OperatorProfile)
@@ -178,6 +196,7 @@ def read_private(path):
 def create_app(config=None, connector=None, speech=None):
     config = config or Config()
     store = Store(config.state_dir)
+    calls = Calls(config.calls, store)
     codex = connector or CodexConnector(config.voice_socket)
     speech = speech or Speech(config, store)
     engine = SpeechEngine(store, codex)
@@ -261,6 +280,12 @@ def create_app(config=None, connector=None, speech=None):
                     item.update(status="needs_configuration", detail="Add an API key" if not item["key_configured"] else "Choose an ElevenLabs voice ID")
                 else:
                     item.update(status="configured", detail="Cloud provider configured; usage is billed by ElevenLabs")
+            if id in {"codex-stt", "codex-tts"}:
+                # Do not launch Codex or consume allowance for dashboard polling.
+                item.update(status="configured" if record["enabled"] else "disabled",
+                            detail="Experimental ChatGPT subscription voice; requires the dedicated speech-only build and local login. Runtime and account access are not checked here.")
+                if id == "codex-tts":
+                    item["detail"] += " Output is non-verbatim: it may change or omit words. Do not use for approvals, amounts or codes."
             items.append(item)
         health_cache.update(time=time.monotonic(),items=items)
         return items
@@ -334,20 +359,30 @@ def create_app(config=None, connector=None, speech=None):
 
     @asynccontextmanager
     async def lifespan(app):
-        if config.speech_engine_port:
-            await engine_audio.start()
-        task = asyncio.create_task(monitor())
-        store.event("platform.started", "Switchboard started")
+        task = None
         try:
+            await calls.start()
+            if config.speech_engine_port:
+                await engine_audio.start()
+            task = asyncio.create_task(monitor())
+            store.event("platform.started", "Switchboard started")
             yield
         finally:
-            task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await task
-            await engine_audio.close()
-            store.close()
+            try:
+                if task:
+                    task.cancel()
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await task
+                try:
+                    await engine_audio.close()
+                finally:
+                    await calls.close()
+            finally:
+                store.close()
 
     app = FastAPI(title="Switchboard API", version=__version__, description="Shared phone sessions, operators, speech and optional directories.", lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url="/api/openapi.json")
+    app.include_router(calls.router())
+    app.state.calls = calls
     app.state.store, app.state.config = store, config
     app.state.sync_recent_huddles = sync_recent_huddles
     app.state.speech_engine = engine
@@ -359,6 +394,8 @@ def create_app(config=None, connector=None, speech=None):
         if is_api and path != API+"/auth/login":
             bearer = request.headers.get("authorization", "").removeprefix("Bearer ")
             authorized = bool(bearer) and secrets.compare_digest(bearer.encode(), store.admin_token.encode())
+            if path == CALLS_PREFIX or path.startswith(CALLS_PREFIX + "/"):
+                authorized = authorized or calls.authorized(request.headers.get("authorization", ""))
             cookie = request.cookies.get("switchboard_session", "")
             if not authorized and not (cookie and store.valid_login(cookie)):
                 return JSONResponse({"detail":"Sign in to Switchboard"},status_code=401)
@@ -738,11 +775,19 @@ def create_app(config=None, connector=None, speech=None):
         if not record:
             raise HTTPException(404,"Unknown integration")
         changes = body.config or {}
-        allowed = {ENGINE_PROVIDER:{"engine_id","upstream_url","voice_id","model_id","language"},"whisper":{"model","language"},"piper":{"voice"},"elevenlabs-stt":{"model_id","language"},"elevenlabs-tts":{"model_id","voice_id"},"amp":{"host"},"codex":{"host"}}
+        allowed = {ENGINE_PROVIDER:{"engine_id","upstream_url","voice_id","model_id","language"},"whisper":{"model","language"},"piper":{"voice"},"elevenlabs-stt":{"model_id","language"},"elevenlabs-tts":{"model_id","voice_id"},"amp":{"host"},"codex":{"host"},"codex-stt":set(),"codex-tts":{"voice","allow_non_verbatim"}}
         if set(changes)-allowed.get(id,set()):
             raise HTTPException(400,"Unsupported configuration field")
         if id == ENGINE_PROVIDER:
             validate_engine_config(changes)
+        elif id == "codex-tts":
+            if "allow_non_verbatim" in changes and not isinstance(changes["allow_non_verbatim"], bool):
+                raise HTTPException(400,"allow_non_verbatim must be a boolean")
+            if changes.get("voice", "cove") not in ("juniper", "maple", "spruce", "ember", "vale", "breeze", "arbor", "sol", "cove"):
+                raise HTTPException(400,"Unsupported Codex voice")
+            consent = changes.get("allow_non_verbatim", record["config"].get("allow_non_verbatim"))
+            if (body.enabled if body.enabled is not None else record["enabled"]) and consent is not True:
+                raise HTTPException(400,"Codex speech is non-verbatim; acknowledge allow_non_verbatim before enabling it")
         elif any(not isinstance(value,str) or len(value)>100 or not re.fullmatch(r"[\w.\-]*",value) for value in changes.values()):
             raise HTTPException(400,"Invalid provider configuration")
         if id == "whisper" and changes.get("model", "base.en") not in {"tiny","tiny.en","base","base.en","small","small.en","medium","medium.en","large-v3","large-v3-turbo"}:
@@ -831,12 +876,16 @@ def create_app(config=None, connector=None, speech=None):
                 response.raise_for_status()
                 result = response.json()
                 if not isinstance(result,dict):
-                    raise ValueError("Invalid conversation response")
+                    raise TypeError("Invalid conversation response")
                 return result
         except httpx.TimeoutException:
-            raise ConnectorError("Home Assistant timed out; check device state before repeating a command",504) from None
-        except (httpx.HTTPError,ValueError):
-            raise ConnectorError("Home Assistant could not process the conversation; check its connection and credentials",503) from None
+            raise ConnectorError(
+                "Home Assistant timed out; check device state before repeating a command", 504
+            ) from None
+        except (httpx.HTTPError, ValueError, TypeError):
+            raise ConnectorError(
+                "Home Assistant could not process the conversation; check its connection and credentials", 503
+            ) from None
 
     @app.get(API+"/settings")
     async def settings():
@@ -872,7 +921,7 @@ def create_app(config=None, connector=None, speech=None):
         if body.integration != native["integration"]:
             raise HTTPException(400,"Choose speech providers or a dial alias for this integration")
         ext = body.extension
-        if ext != native["extension"] and (ext in {"0","555","600","601","602","611","911","112","999"} or ext.startswith(("6","88","89"))):
+        if ext != native["extension"] and (ext in {"0","333","555","600","601","602","611","911","112","999"} or ext.startswith(("6","88","89"))):
             raise HTTPException(409,"This extension is reserved by the phone system")
         if any(r["extension"]==ext and r["id"]!=id for r in store.all("routes")):
             raise HTTPException(409,"This extension is already assigned")
@@ -890,8 +939,12 @@ def create_app(config=None, connector=None, speech=None):
         records = [record if r["id"]==id else r for r in store.all("routes")]
         if config.route_reload and (ext != old["extension"] or body.enabled != old["enabled"]):
             directory = config.state_dir / "asterisk"
-            directory.mkdir(mode=0o700,exist_ok=True)
-            contents = "[switchboard-routes]\n"
+            directory.mkdir(mode=0o700, exist_ok=True)
+            contents = (
+                '#tryinclude "switchboard/stream-calls.conf"\n'
+                '#tryinclude "switchboard/incoming-calls.conf"\n'
+                '[switchboard-routes]\ninclude => switchboard-incoming-route\n'
+            )
             for r in records:
                 target = next(n["extension"] for n in ROUTES if n["id"]==r["id"])
                 if r["enabled"] and r["extension"] != target:
@@ -928,7 +981,12 @@ def create_app(config=None, connector=None, speech=None):
             return await route_update_locked(id, body)
 
     @app.post(API+"/speech/transcribe")
-    async def transcribe(file: UploadFile=File(...), provider: str|None=Form(None), language: str|None=Form(None), route: str|None=Form(None)):
+    async def transcribe(
+        file: Annotated[UploadFile, File()],
+        provider: str | None = Form(None),
+        language: str | None = Form(None),
+        route: str | None = Form(None),
+    ):
         audio = await file.read(MAX_AUDIO+1)
         await file.close()
         if not audio or len(audio)>MAX_AUDIO:

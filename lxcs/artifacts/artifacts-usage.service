@@ -1,0 +1,15 @@
+[Unit]
+Description=Sample container resource usage without secrets
+
+[Service]
+Type=oneshot
+User=root
+ExecStart=/usr/local/sbin/artifacts-usage sample
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/log/artifacts-usage
+# Do not use PrivateUsers/ProtectControlGroups/PrivateMounts here: sample the
+# LXC's namespace root, not an isolated service cgroup namespace.
+TimeoutStartSec=45

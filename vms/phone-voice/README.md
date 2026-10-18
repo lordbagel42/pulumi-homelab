@@ -11,7 +11,7 @@ read-back with “yes” or **#**. Numbered matches accept speech or keys 1–5;
 **\*** starts a new search. The operator shares the Codex bridge's local speech
 models and hands the existing phone connection to Chime after confirmation.
 It does not transcribe the ensuing huddle or create a Codex task.
-The encrypted `huddle-phone:operatorSecret` is shared through a mode-0600
+The Infisical secret `/huddle-phone/HUDDLE_PHONE_OPERATOR_SECRET` is shared through a mode-0600
 `state/huddle-operator.json`; `huddle-phone:operatorOwnerId` controls “call me”.
 
 Dial 611 and choose **1 / Proxmox** or **2 / workstation**. Sessions run on
@@ -44,8 +44,9 @@ Private data stays in `/var/lib/codex-phone`, outside releases:
 
 ## Configuration and deployment
 
-The `phone-voice` Pulumi namespace contains `enabled`, secret
-`homeAssistantConfig`, `tunnelPublicKey`, and `dhcpEnabled` (default false).
+The `phone-voice` Pulumi namespace contains `enabled`, `tunnelPublicKey`, and
+`dhcpEnabled` (default false). The Home Assistant config is the Infisical secret
+`/phone-voice/PHONE_VOICE_HOME_ASSISTANT_CONFIG`.
 SSH uses the already verified `huddle-phone:sshHostKey` and homelab private key.
 No credentials or user histories belong in the public `source/` snapshot.
 

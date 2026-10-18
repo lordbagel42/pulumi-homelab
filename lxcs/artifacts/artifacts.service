@@ -1,0 +1,38 @@
+[Unit]
+Description=Owner artifact management and public named artifacts
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=120
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=artifacts
+Group=artifacts
+WorkingDirectory=/var/lib/artifacts
+EnvironmentFile=/etc/artifacts/app.env
+ExecStart=/opt/artifacts/current/artifacts
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/artifacts
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+# Bun's JIT requires writable/executable memory: no MemoryDenyWriteExecute.
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=artifacts
+
+[Install]
+WantedBy=multi-user.target

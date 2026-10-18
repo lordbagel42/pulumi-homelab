@@ -5,7 +5,7 @@ from pathlib import Path
 import shutil
 import tempfile
 
-ALLOWED = {"phone_platform", "web", "deploy", "bin", "requirements.txt", "README.md", "SPEECH-ENGINE.md"}
+ALLOWED = {"phone_platform", "web", "deploy", "bin", "requirements.txt", "README.md", "SPEECH-ENGINE.md", "CALL-STREAMING.md"}
 EXCLUDED = {"node_modules", ".venv", ".git", "__pycache__", "state", "models", ".env", "admin-token"}
 
 

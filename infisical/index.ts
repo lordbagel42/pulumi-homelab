@@ -10,18 +10,38 @@ export interface InfisicalConfig {
     host?: string;
 }
 
-export function managedSecret(secretName: string, config: InfisicalConfig): pulumi.Output<string> {
-    return _getOrCreateSecret(secretName, config, `openssl rand -hex 32`, `infisical-secret-${secretName}`);
+export function managedSecret(
+    secretName: string,
+    config: InfisicalConfig,
+): pulumi.Output<string> {
+    return _getOrCreateSecret(
+        secretName,
+        config,
+        `openssl rand -hex 32`,
+        `infisical-secret-${secretName}`,
+    );
 }
 
-/** Reads an existing secret; fails hard if not found rather than generating a placeholder. */
-export function readSecret(secretName: string, config: InfisicalConfig): pulumi.Output<string> {
-    return _getOrCreateSecret(
+const readSecrets = new Map<string, pulumi.Output<string>>();
+
+/**
+ * Reads an existing secret; fails hard if not found rather than generating a placeholder.
+ * Repeated reads of the same secret share one resource, so several modules can use it.
+ */
+export function readSecret(
+    secretName: string,
+    config: InfisicalConfig,
+): pulumi.Output<string> {
+    const cached = readSecrets.get(secretName);
+    if (cached) return cached;
+    const value = _getOrCreateSecret(
         secretName,
         config,
         `printf 'readSecret: "%s" not found at "%s" (HTTP %s): %s\\n' '${secretName}' '${config.secretPath}' "$STATUS" "$_INFISICAL_BODY" >&2; exit 1`,
         `read-secret-${secretName}`,
     );
+    readSecrets.set(secretName, value);
+    return value;
 }
 
 /**
@@ -32,13 +52,19 @@ export function readSecret(secretName: string, config: InfisicalConfig): pulumi.
  * Use this for values a service can start without. A missing one must not be
  * able to take down an unrelated part of the stack.
  */
-export function optionalSecret(secretName: string, config: InfisicalConfig): pulumi.Output<string> {
+export function optionalSecret(
+    secretName: string,
+    config: InfisicalConfig,
+): pulumi.Output<string> {
     const host = config.host ?? "https://app.infisical.com";
     const encodedPath = encodeURIComponent(config.secretPath);
 
-    const cmd = new command.local.Command(`optional-secret-${secretName}`, {
-        interpreter: ["/bin/bash", "-c"],
-        create: `
+    const cmd = new command.local.Command(
+        `optional-secret-${secretName}`,
+        {
+            interpreter: ["/bin/bash", "-c"],
+            logging: "none",
+            create: `
 set -euo pipefail
 
 AUTH_RESP=$(curl -s -X POST "${host}/api/v1/auth/universal-auth/login" \\
@@ -63,17 +89,22 @@ else
 fi
 rm -f "$RESP"
         `.trim(),
-        environment: {
-            _CLIENT_ID: config.clientId,
-            _CLIENT_SECRET: config.clientSecret,
-            _PROJECT_ID: config.projectId,
+            environment: {
+                _CLIENT_ID: config.clientId,
+                _CLIENT_SECRET: config.clientSecret,
+                _PROJECT_ID: config.projectId,
+            },
         },
-    });
+        { additionalSecretOutputs: ["stdout", "stderr"] },
+    );
 
     return pulumi.secret(cmd.stdout);
 }
 
-export function lxcPassword(containerName: string, config: InfisicalConfig): pulumi.Output<string> {
+export function lxcPassword(
+    containerName: string,
+    config: InfisicalConfig,
+): pulumi.Output<string> {
     return _getOrCreateSecret(
         `lxc-root-${containerName}`,
         config,
@@ -82,18 +113,30 @@ export function lxcPassword(containerName: string, config: InfisicalConfig): pul
     );
 }
 
-function _getOrCreateSecret(secretName: string, config: InfisicalConfig, generateCmd: string, resourceName: string): pulumi.Output<string> {
+function _getOrCreateSecret(
+    secretName: string,
+    config: InfisicalConfig,
+    generateCmd: string,
+    resourceName: string,
+): pulumi.Output<string> {
     const host = config.host ?? "https://app.infisical.com";
     const encodedPath = encodeURIComponent(config.secretPath);
 
-    const pathParts = config.secretPath.replace(/^\//, "").split("/").filter(Boolean);
+    const pathParts = config.secretPath
+        .replace(/^\//, "")
+        .split("/")
+        .filter(Boolean);
     const folderName = pathParts[pathParts.length - 1] ?? "";
-    const folderParent = pathParts.length > 1 ? "/" + pathParts.slice(0, -1).join("/") : "/";
+    const folderParent =
+        pathParts.length > 1 ? "/" + pathParts.slice(0, -1).join("/") : "/";
 
     // No delete script: secret persists in Infisical across pulumi destroy cycles.
-    const cmd = new command.local.Command(resourceName, {
-        interpreter: ["/bin/bash", "-c"],
-        create: `
+    const cmd = new command.local.Command(
+        resourceName,
+        {
+            interpreter: ["/bin/bash", "-c"],
+            logging: "none",
+            create: `
 set -euo pipefail
 
 AUTH_RESP=$(curl -s -X POST "${host}/api/v1/auth/universal-auth/login" \\
@@ -148,12 +191,14 @@ fi
 
 printf '%s' "$VALUE"
         `.trim(),
-        environment: {
-            _CLIENT_ID: config.clientId,
-            _CLIENT_SECRET: config.clientSecret,
-            _PROJECT_ID: config.projectId,
+            environment: {
+                _CLIENT_ID: config.clientId,
+                _CLIENT_SECRET: config.clientSecret,
+                _PROJECT_ID: config.projectId,
+            },
         },
-    });
+        { additionalSecretOutputs: ["stdout", "stderr"] },
+    );
 
     return pulumi.secret(cmd.stdout);
 }

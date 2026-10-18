@@ -1,0 +1,11 @@
+[Unit]
+Description=Record artifacts LXC resources every minute
+
+[Timer]
+OnCalendar=*-*-* *:*:00
+AccuracySec=1s
+Persistent=true
+Unit=artifacts-usage.service
+
+[Install]
+WantedBy=timers.target

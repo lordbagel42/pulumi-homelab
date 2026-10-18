@@ -33,7 +33,7 @@ jobs:
         run: sudo apt-get install -y shellcheck
 
       - name: Lint shell scripts
-        run: find lxcs vms -name "*.sh" | xargs shellcheck --severity=warning
+        run: find lxcs vms -name "*.sh" -print0 | xargs -0 shellcheck --severity=warning
 
   deploy:
     name: Deploy
@@ -82,10 +82,26 @@ jobs:
             exit 1
           fi
 
+      - name: Install provisioning tools
+        run: sudo apt-get update -qq && sudo apt-get install -y ansible-core jq
+
+      - name: Install Pulumi CLI
+        uses: pulumi/actions@v6
+
+      - name: Fetch pinned artifacts binary
+        run: bash lxcs/artifacts/fetch-bundle.sh
+        env:
+          PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
+
       - uses: pulumi/actions@v6
         with:
           command: up
           stack-name: homelab
+          # Inspiron/PBS is offline. Keep its resources managed but untouched;
+          # remove these exclusions only after an explicit recovery preview.
+          exclude: |
+            urn:pulumi:homelab::pulumi-homelab::**::pbs-*
+            urn:pulumi:homelab::pulumi-homelab::**::proxmox-backup-server
           # Reconcile state against reality before updating. Consul service
           # registrations in particular get lost out of band (an agent restart
           # dropped the authentik service while Pulumi still believed it

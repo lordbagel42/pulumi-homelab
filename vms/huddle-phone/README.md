@@ -23,16 +23,15 @@ All settings are in the `huddle-phone` Pulumi namespace:
 | `teamId` | Channel workspace ID (`T...`), not the enterprise ID |
 | `enterpriseId` | Enterprise Grid organization ID (`E...`), when applicable |
 | `channelId` | The single channel to watch |
-| `clientToken` | **Secret:** the Slack user's `xoxc` token |
-| `cookie` | **Secret:** `d=xoxd-...` from that same session |
-| `amiSecret` | **Secret:** 24–128 URL-safe letters, numbers, hyphens or underscores |
 | `dryRun` | Log detections without calling; defaults to true |
 | `incomingInvites` | Ring for direct huddle invitations to the Slack account; defaults to true |
 | `phoneChannel` | Defaults to `SCCP/6738` |
 
-Use `pulumi config set --secret huddle-phone:clientToken` and its hidden prompt
-for secret values. Do the same for `cookie` and `amiSecret`. Never commit an
-unencrypted session token. The module uses secret Outputs and SSH stdin to create
+Secrets live in Infisical (`prod`, `/huddle-phone`), never in Pulumi config:
+`HUDDLE_PHONE_CLIENT_TOKEN` (the Slack user's `xoxc` token),
+`HUDDLE_PHONE_COOKIE` (`d=xoxd-...` from that same session),
+`HUDDLE_PHONE_AMI_SECRET` (24–128 URL-safe letters, numbers, hyphens or
+underscores) and `HUDDLE_PHONE_OPERATOR_SECRET`. Never commit a session token. The module uses secret Outputs and SSH stdin to create
 a root-only `.env`; secrets are not placed in command arguments or logged.
 
 ## Deploy

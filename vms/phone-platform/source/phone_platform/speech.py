@@ -1,4 +1,4 @@
-"""One speech interface for local models and ElevenLabs. Audio is not retained."""
+"""One speech interface for local and opt-in cloud models. Audio is not retained."""
 import asyncio
 import io
 import re
@@ -64,6 +64,16 @@ class Speech:
         async with self.limit:
             if chosen["id"] == "whisper":
                 text = await asyncio.to_thread(self._whisper, audio, chosen["config"], language, prompt)
+            elif chosen["id"] == "codex-stt":
+                try:
+                    from . import codex_speech
+                except ImportError:
+                    raise SpeechError("Install requirements-codex.txt for experimental Codex speech") from None
+                try:
+                    # Caller hints are not privileged realtime instructions.
+                    text = await codex_speech.transcribe(audio)
+                except codex_speech.CodexSpeechError as error:
+                    raise SpeechError(str(error)) from None
             else:
                 key = self.store.credential("elevenlabs-stt")
                 if not key:
@@ -110,6 +120,17 @@ class Speech:
         async with self.limit:
             if chosen["id"] == "piper":
                 return await asyncio.to_thread(self._piper, text), "audio/wav"
+            if chosen["id"] == "codex-tts":
+                if chosen["config"].get("allow_non_verbatim") is not True:
+                    raise SpeechError("Codex speech is non-verbatim; explicitly enable allow_non_verbatim or choose Piper")
+                try:
+                    from . import codex_speech
+                except ImportError:
+                    raise SpeechError("Install requirements-codex.txt for experimental Codex speech") from None
+                try:
+                    return await codex_speech.synthesize(text, chosen["config"].get("voice", "cove")), "audio/wav"
+                except codex_speech.CodexSpeechError as error:
+                    raise SpeechError(str(error)) from None
             key = self.store.credential("elevenlabs-tts") or self.store.credential("elevenlabs-stt")
             voice = chosen["config"].get("voice_id")
             if not key or not voice:

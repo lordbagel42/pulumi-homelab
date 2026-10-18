@@ -22,5 +22,6 @@
         "nomad/**/*.ts",
         "utils/**/*.ts",
         "vms/**/*.ts"
-    ]
+    ],
+    "exclude": ["vms/phone-voice/source"]
 }

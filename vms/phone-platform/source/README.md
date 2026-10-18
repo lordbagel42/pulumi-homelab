@@ -100,6 +100,15 @@ progress using `PATCH /api/v1/sessions/{id}` with `summary` and `state`. The
 original tool remains responsible for the task; Switchboard owns phone access.
 The existing Codex MCP tool uses the compatibility `/api/v1/phone/rpc` endpoint.
 
+## Call and stream audio
+
+External services can reserve a handset call with `POST /api/v1/calls`, then
+attach its authenticated WebSocket to start ringing and stream two-way PCM.
+This API starts with Switchboard, with no opt-in flag or speech-provider account.
+It has a dedicated call-only token and does not grant dashboard administration.
+See [call streaming](CALL-STREAMING.md) for the PBX connection, client example,
+idempotency, audio format, and Executor integration after deployment.
+
 ## Optional directories
 
 Register once with `POST /api/v1/directories`:
@@ -134,7 +143,12 @@ provider used. Uploads are limited to 25 MiB and audio is not saved by Switchboa
 
 `POST /api/v1/speech/synthesize` accepts `{"text":"Hello","provider":"piper"}`
 and returns audio. Provider IDs are `whisper`, `elevenlabs-stt`, `piper`, and
-`elevenlabs-tts`. Defaults and route overrides are configurable in the dashboard.
+`elevenlabs-tts`, plus opt-in experimental `codex-stt` and `codex-tts`.
+Codex uses a ChatGPT subscription login and a dedicated speech-only build;
+its output is **not guaranteed verbatim**. See [Codex speech setup and
+limitations](CODEX-SPEECH.md) before enabling it. Piper remains the recommended
+playback provider for approval questions and exact wording.
+Defaults and route overrides are configurable in the dashboard.
 For phone recognition, `POST /api/v1/speech/phone/transcribe` accepts
 `{"audio":"<base64 PCM>","sample_rate":8000,"route":"codex"}`. The PCM is
 signed 16-bit mono audio at 8 kHz; the response is JSON containing `text` and

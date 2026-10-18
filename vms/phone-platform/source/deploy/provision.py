@@ -1,12 +1,12 @@
 """Install Switchboard on the existing phone VM; never restart the voice bridge."""
 import json
 import os
-from pathlib import Path
 import pwd
 import re
 import subprocess
 import sys
 import tempfile
+from pathlib import Path
 
 STATE = Path("/var/lib/codex-phone/switchboard")
 
@@ -23,6 +23,41 @@ def write(path, content, mode=0o644, owner=None):
         if owner:
             os.fchown(staged.fileno(), owner.pw_uid, owner.pw_gid)
     os.replace(staged.name, path)
+
+
+def configure_calls(release, account, calls):
+    channel, user, secret = calls["channel"], calls["user"], calls["secret"]
+    if not re.fullmatch(r"(?:SCCP|PJSIP|SIP)/[A-Za-z0-9_.-]+", channel):
+        raise ValueError("Invalid fixed call handset")
+    if not re.fullmatch(r"[A-Za-z0-9_-]+", user) or not re.fullmatch(r"[A-Za-z0-9_-]{24,128}", secret):
+        raise ValueError("Invalid call AMI credentials")
+    routes = STATE / "asterisk/routes.conf"
+    contents = routes.read_text() if routes.exists() else "[switchboard-routes]\n"
+    if re.search(r"(?m)^\s*exten\s*=>\s*333\s*,", contents):
+        raise ValueError("Extension 333 is already assigned; resolve the alias before provisioning")
+    if contents.splitlines().count("[switchboard-routes]") != 1:
+        raise ValueError("Expected one switchboard-routes context")
+    write(
+        STATE / "calls.env",
+        (
+            f"PHONE_PLATFORM_CALL_CHANNEL={channel}\n"
+            f"PHONE_PLATFORM_AMI_USER={user}\n"
+            f"PHONE_PLATFORM_AMI_SECRET={secret}\n"
+            "PHONE_PLATFORM_AMI_PORT=5038\n"
+            "PHONE_PLATFORM_CALL_INCOMING_PORT=4573\n"
+        ),
+        0o600,
+        account,
+    )
+    for name in ("stream-calls.conf", "incoming-calls.conf"):
+        write(STATE / "asterisk" / name, (release / "deploy" / name).read_text(), 0o644, account)
+        include = f'#tryinclude "switchboard/{name}"'
+        if include not in contents.splitlines():
+            contents = include + "\n" + contents
+    route = "include => switchboard-incoming-route"
+    if route not in contents.splitlines():
+        contents = contents.replace("[switchboard-routes]\n", "[switchboard-routes]\n" + route + "\n", 1)
+    write(routes, contents, 0o644, account)
 
 
 def main(payload):
@@ -70,6 +105,8 @@ def main(payload):
     run(str(venv / "bin/python"), "-c", "import fastapi, uvicorn, faster_whisper, piper")
 
     run("python3", str(release / "deploy/assert-idle.py"))
+    configure_calls(release, account, payload["calls"])
+    run("docker", "exec", "sccp-pbx", "asterisk", "-rx", "dialplan reload")
 
     current = Path("/opt/phone-platform/current")
     staged = current.with_name("current.new")

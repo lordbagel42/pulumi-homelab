@@ -143,10 +143,7 @@ export default async function (amp: PluginAPI) {
 	}
 
 	amp.on('session.start', event => { remember(event.thread.id) })
-	amp.on('agent.start', (_event, ctx) => {
-		remember(ctx.thread.id)
-		return {}
-	})
+	amp.on('agent.start', (_event, ctx) => { remember(ctx.thread.id) })
 	amp.onDispose(() => { stopped = true; stopping.abort() })
 
 	amp.registerTool({

@@ -17,10 +17,12 @@ This directory is discovered automatically by the homelab framework. Its stack
 configuration is under `chatgpt-bridge`:
 
 - `enabled`: opt in to creating the service.
-- `rootPassword`: encrypted container password; normal administration uses SSH.
-- `token`: encrypted bearer token shared with Home Assistant's Ollama integration.
 - `sshHostKey`: the container's SSH host public key, verified through `pct exec`
   on the Proxmox node before provisioning.
+
+Secrets live in Infisical (`prod`, `/chatgpt-bridge`): `CHATGPT_BRIDGE_ROOT_PASSWORD`
+(container password; normal administration uses SSH) and `CHATGPT_BRIDGE_TOKEN`
+(bearer token shared with Home Assistant's Ollama integration).
 
 For initial enrollment, deploy the machine first without `sshHostKey`, read
 `/etc/ssh/ssh_host_ed25519_key.pub` through `pct exec 213 -- cat ...` on optiplex,

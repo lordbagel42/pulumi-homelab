@@ -1,0 +1,25 @@
+[Unit]
+Description=Artifacts local Consul client
+After=network-online.target artifacts.service
+Wants=network-online.target
+
+[Service]
+User=consul
+Group=consul
+ExecStart=/usr/local/bin/consul agent -config-dir=/etc/consul.d
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/consul
+ProtectControlGroups=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+CapabilityBoundingSet=
+
+[Install]
+WantedBy=multi-user.target

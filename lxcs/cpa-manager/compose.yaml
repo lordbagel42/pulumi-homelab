@@ -1,0 +1,47 @@
+services:
+  cli-proxy-api:
+    image: eceasy/cli-proxy-api:v8.0.32@sha256:68f6e2d691f7b71aca21cfe87c77b7076cbea26c8ef490b15619b1623a7c0699
+    restart: unless-stopped
+    ports:
+      - "192.168.0.217:8317:8317"
+    volumes:
+      - ./cpa/config.yaml:/CLIProxyAPI/config.yaml
+      - ./cpa/auths:/root/.cli-proxy-api
+      - ./cpa/logs:/CLIProxyAPI/logs
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "2"
+
+  cpa-manager-plus:
+    image: seakee/cpa-manager-plus:1.14.7@sha256:ceade2a412cfc888807b2d75a3a7b7923d320441ace7a2a4b125c9765435f1d7
+    restart: unless-stopped
+    ports:
+      - "192.168.0.217:18317:18317"
+    environment:
+      HTTP_ADDR: "0.0.0.0:18317"
+      USAGE_DB_PATH: /data/usage.sqlite
+      CPA_MANAGER_ADMIN_KEY_FILE: /run/secrets/admin-key
+      CPA_MANAGER_DATA_KEY_FILE: /run/secrets/data-key
+      CPA_UPSTREAM_URL: "http://cli-proxy-api:8317"
+      CPA_MANAGEMENT_KEY_FILE: /run/secrets/upstream-key
+      USAGE_COLLECTOR_MODE: auto
+      USAGE_IMPORT_DISK_QUOTA_BYTES: "10737418240"
+      USAGE_IMPORT_MAX_SESSIONS: "1"
+      USAGE_IMPORT_SESSION_TTL_MINUTES: "60"
+    volumes:
+      - ./data:/data
+      - ./secrets:/run/secrets:ro
+    depends_on:
+      - cli-proxy-api
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:18317/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "2"

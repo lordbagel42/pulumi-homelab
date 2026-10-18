@@ -36,7 +36,7 @@ jobs:
         run: sudo apt-get install -y shellcheck
 
       - name: Lint shell scripts
-        run: find lxcs vms -name "*.sh" | xargs shellcheck --severity=warning
+        run: find lxcs vms -name "*.sh" -print0 | xargs -0 shellcheck --severity=warning
 
   preview:
     name: Preview
@@ -85,10 +85,22 @@ jobs:
             exit 1
           fi
 
+      - name: Install Pulumi CLI
+        uses: pulumi/actions@v6
+
+      - name: Fetch pinned artifacts binary
+        run: bash lxcs/artifacts/fetch-bundle.sh
+        env:
+          PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
+
       - uses: pulumi/actions@v6
         with:
           command: preview
           stack-name: homelab
+          # Match the explicit offline PBS scope in deploy.yml.
+          exclude: |
+            urn:pulumi:homelab::pulumi-homelab::**::pbs-*
+            urn:pulumi:homelab::pulumi-homelab::**::proxmox-backup-server
           # Match deploy.yml so the plan reflects real drift, not stale state.
           refresh: true
           comment-on-pr: true

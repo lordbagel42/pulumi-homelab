@@ -1,10 +1,37 @@
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
-import os
+
+
+@dataclass
+class CallConfig:
+    # Allocate a loopback port automatically and pass it to the PBX per call.
+    audio_port: int = field(default_factory=lambda: int(os.environ.get("PHONE_PLATFORM_CALL_AUDIO_PORT", "0")))
+    # Production provisioning pins FastAGI to 4573; tests/local apps use a free port.
+    incoming_port: int = field(default_factory=lambda: int(os.environ.get("PHONE_PLATFORM_CALL_INCOMING_PORT", "0")))
+    channel: str = field(
+        default_factory=lambda: os.environ.get("PHONE_PLATFORM_CALL_CHANNEL", os.environ.get("PHONE_CHANNEL", ""))
+    )
+    ami_host: str = "127.0.0.1"
+    ami_port: int = field(
+        default_factory=lambda: int(os.environ.get("PHONE_PLATFORM_AMI_PORT", os.environ.get("AMI_PORT", "5038")))
+    )
+    ami_user: str = field(
+        default_factory=lambda: os.environ.get("PHONE_PLATFORM_AMI_USER", os.environ.get("AMI_USER", "switchboard"))
+    )
+    ami_secret: str = field(
+        default_factory=lambda: os.environ.get("PHONE_PLATFORM_AMI_SECRET", os.environ.get("AMI_SECRET", "")),
+        repr=False,
+    )
+    token: str = field(default_factory=lambda: os.environ.get("PHONE_PLATFORM_CALL_TOKEN", ""), repr=False)
+    ring_seconds: int = 30
+    attach_seconds: int = 15
+    offer_seconds: int = 30
 
 
 @dataclass
 class Config:
+    calls: CallConfig = field(default_factory=CallConfig)
     state_dir: Path = field(default_factory=lambda: Path(os.environ.get("PHONE_PLATFORM_STATE_DIR", "state")))
     voice_socket: Path = field(default_factory=lambda: Path(os.environ.get("PHONE_PLATFORM_VOICE_SOCKET", "/var/lib/codex-phone/state/control.sock")))
     models_dir: Path = field(default_factory=lambda: Path(os.environ.get("PHONE_PLATFORM_MODELS_DIR", "/var/lib/codex-phone/models")))

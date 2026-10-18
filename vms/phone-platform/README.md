@@ -13,10 +13,10 @@ The independent platform venv reuses existing pinned voice packages through a
 
 ## Deploy
 
-Set `phone-platform:enabled=true` and an encrypted `phone-platform:adminToken`
-(a random URL-safe value of at least 40 characters), plus a different encrypted
-`phone-platform:phoneToken` for read-only handset directories. The existing encrypted
-`huddle-phone:operatorSecret` supplies the Huddle adapter's credential. No keys
+Set `phone-platform:enabled=true`. In Infisical (`prod`, `/phone-platform`) set
+`PHONE_PLATFORM_ADMIN_TOKEN` (a random URL-safe value of at least 40 characters)
+and a different `PHONE_PLATFORM_PHONE_TOKEN` for read-only handset directories.
+The existing Infisical `/huddle-phone/HUDDLE_PHONE_OPERATOR_SECRET` supplies the Huddle adapter's credential. No keys
 belong in the public source snapshot.
 
 ```bash

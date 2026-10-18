@@ -46,6 +46,8 @@ export const LOOKOUT_PGDATA_PATH = `/opt/nomad/volumes/${LOOKOUT_PGDATA_VOLUME}`
 export function register(ctx: ServiceContext) {
     const consulMachine = new ProxmoxMachine("consul-server", {
         type: "lxc",
+        // Node changes require disk-preserving migration and state reconciliation.
+        nodeName: "tower",
         vmId: CONSUL_VMID,
         ip: CONSUL_IP_CONST,
         cpu: 1,

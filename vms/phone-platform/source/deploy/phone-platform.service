@@ -26,6 +26,7 @@ Environment=PHONE_PLATFORM_MODELS_DIR=/var/lib/codex-phone/models
 Environment=PHONE_PLATFORM_HOME_ASSISTANT_CONFIG=/var/lib/codex-phone/home-assistant.json
 Environment=PHONE_PLATFORM_HUDDLE_CONFIG=/var/lib/codex-phone/switchboard/huddle.json
 Environment=PHONE_PLATFORM_DIALPLAN_DIR=/var/lib/codex-phone/switchboard/asterisk
+EnvironmentFile=-/var/lib/codex-phone/switchboard/calls.env
 Environment=WHISPER_MODEL=base.en
 Environment=WHISPER_CPU_THREADS=4
 UMask=0077
