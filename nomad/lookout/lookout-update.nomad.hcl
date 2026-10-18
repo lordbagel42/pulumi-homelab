@@ -2,7 +2,13 @@ job "lookout-updater" {
   datacenters = ["homelab"]
   type        = "batch"
 
-  # Periodic scheduling disabled; retain the job definition for manual runs.
+  # Keep the periodic identity: Nomad cannot convert an existing periodic job
+  # to a regular batch job. Disable its schedule without triggering a restart.
+  periodic {
+    enabled          = false
+    crons            = ["0 6 * * *"]
+    prohibit_overlap = true
+  }
 
   group "update" {
     count = 1

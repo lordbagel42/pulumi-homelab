@@ -39,6 +39,12 @@ the exclusions from both workflows.
 - CPA Manager, artifacts, Codex API and Consul's placement on Tower are declared
   in main so an ordinary update preserves them rather than undoing targeted
   deployments made from other worktrees.
+  CPA's `codex.mrow.tech` also requires the dashboard-managed Optiplex tunnel
+  `a94c53ea-06e2-47ec-bfba-77bb0a5db5a6` to have an exact-host ingress entry
+  pointing to `http://192.168.0.203` before the `http_status:404` fallback.
+  DNS alone is insufficient: the existing wildcard ingress rules cover only
+  `raygen.dev` and `bagelindustries.com`. Preserve those rules when editing the
+  tunnel; its ingress configuration is not currently managed by this stack.
 
 Service secrets are read from Infisical. The reconciliation migrated June's
 existing credentials into `/june` without rotating them and removed encrypted
