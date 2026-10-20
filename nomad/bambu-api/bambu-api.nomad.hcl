@@ -63,6 +63,10 @@ job "bambu-api" {
         BAMBU_ENV_FILE       = "/run/secrets/bambu-api.env"
         BAMBU_PUBLIC_URL     = "https://bambuapi.raygen.dev"
         BAMBU_CORS_ORIGINS   = "https://bambu.raygen.dev"
+        # The camera helper's closed plugin writes its own log directories
+        # into its working directory; the task dir is the writable place on a
+        # read-only rootfs.
+        TMPDIR               = "$${NOMAD_TASK_DIR}"
         ENVIRONMENT_REVISION = var.environment_revision
       }
 
@@ -109,8 +113,10 @@ job "bambu-api" {
       }
 
       resources {
-        cpu    = 200
-        memory = 256
+        cpu    = 300
+        # Each printer being watched runs a bambu-tunnel helper that maps the
+        # Studio network plugin (and the 30 MB Agora SDK) alongside the API.
+        memory = 512
       }
     }
   }

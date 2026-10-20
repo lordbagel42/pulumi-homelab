@@ -9,7 +9,7 @@ config:
   huddle-phone:channelId: C08T6CY7S10
   bambu-api:enabled: "true"
   bambu-api:sshHostKey: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAICKu8R0MF7Ord31qJPrzygHfwRf1frLzUgOzdTe62BUC root@localhost
-  bambu-api:image: bambu-api:b98deb4
+  bambu-api:image: bambu-api:17ad8e0
   chatgpt-bridge:enabled: "true"
   huddle-phone:sshHostKey: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJ6yM7aIrkYryZr3CbcrzwWZf9blGwwr2+sWuOKDEMS/ root@localhost
   chatgpt-bridge:sshHostKey: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPuU5lQjHmJzJqWTYEFy2hUKUctFIBCCzFQpM8m66MVa root@chatgpt-bridge
