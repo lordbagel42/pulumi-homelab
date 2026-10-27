@@ -25,7 +25,7 @@ services:
       - "host.docker.internal:host-gateway"
 
   cloudflared:
-    image: cloudflare/cloudflared:latest
+    image: cloudflare/cloudflared:2026.10.4
     container_name: cloudflared
     restart: unless-stopped
     network_mode: host

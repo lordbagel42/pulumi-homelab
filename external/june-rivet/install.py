@@ -10,8 +10,8 @@ import time
 import urllib.error
 import urllib.request
 
-VERSION = "2026.9.3"
-SHA256 = "77e26d8d900e0b8469f416239d14b5f296525fdf79fee6f511ef55609e3fbac2"
+VERSION = "2026.10.4"
+SHA256 = "ae5e8add7884b0531d66bbca4570d1de491ff6da51e4ebe7eb160cdf241d9e42"
 DIRECTORY = Path("/usr/local/lib/june-rivet")
 CREDENTIALS = Path("/etc/june-rivet-tunnel")
 UNIT = Path("/etc/systemd/system/june-rivet-tunnel.service")
