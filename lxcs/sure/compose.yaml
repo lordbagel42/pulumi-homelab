@@ -1,0 +1,104 @@
+x-rails-env: &rails_env
+  SELF_HOSTED: "true"
+  RAILS_FORCE_SSL: "false"
+  RAILS_ASSUME_SSL: "true"
+  WEBAUTHN_RP_ID: raygen.dev
+  WEBAUTHN_ALLOWED_ORIGINS: https://sure.raygen.dev
+  POSTGRES_USER: sure_user
+  POSTGRES_DB: sure_production
+  DB_HOST: db
+  DB_PORT: "5432"
+  REDIS_URL: redis://redis:6379/1
+  SECRET_KEY_BASE: ${SECRET_KEY_BASE:?required}
+  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?required}
+  ACTIVE_RECORD_ENCRYPTION_PRIMARY_KEY: ${ACTIVE_RECORD_ENCRYPTION_PRIMARY_KEY:?required}
+  ACTIVE_RECORD_ENCRYPTION_DETERMINISTIC_KEY: ${ACTIVE_RECORD_ENCRYPTION_DETERMINISTIC_KEY:?required}
+  ACTIVE_RECORD_ENCRYPTION_KEY_DERIVATION_SALT: ${ACTIVE_RECORD_ENCRYPTION_KEY_DERIVATION_SALT:?required}
+  LLM_PROVIDER: openai
+  OPENAI_URI_BASE: https://ai.hackclub.com/proxy/v1
+  OPENAI_ACCESS_TOKEN: ${OPENAI_ACCESS_TOKEN:-}
+  OPENAI_MODEL: openai/gpt-4.1-mini
+  OPENAI_SUPPORTS_RESPONSES_ENDPOINT: "false"
+  LLM_JSON_MODE: auto
+  LLM_CONTEXT_WINDOW: "32768"
+  LLM_MAX_RESPONSE_TOKENS: "4096"
+  CATEGORIZATION_PROVIDER: ${CATEGORIZATION_PROVIDER:-llm}
+  JEV_API_KEY: ${JEV_API_KEY:-}
+  JEV_ENDPOINT: https://ai.hackclub.com/proxy/v1/jev/systemone
+  JEV_MODEL: jev-latest
+  RAILS_MAX_THREADS: "3"
+  RAILS_AI_MAX_THREADS: "1"
+
+services:
+  web:
+    image: ghcr.io/we-promise/sure:0.7.6
+    restart: unless-stopped
+    environment: *rails_env
+    ports:
+      - "192.168.0.219:3000:3000"
+    volumes:
+      - app-storage:/rails/storage
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://localhost:3000/up"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      # Cold schema creation on the HDD takes several minutes.
+      start_period: 600s
+    mem_limit: 768m
+    logging: &logging
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+  worker:
+    image: ghcr.io/we-promise/sure:0.7.6
+    command: bundle exec sidekiq -C config/sidekiq.yml
+    restart: unless-stopped
+    environment: *rails_env
+    volumes:
+      - app-storage:/rails/storage
+    depends_on:
+      web:
+        condition: service_healthy
+    mem_limit: 768m
+    logging: *logging
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: sure_user
+      POSTGRES_DB: sure_production
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?required}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    mem_limit: 256m
+    logging: *logging
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes --maxmemory 128mb --maxmemory-policy noeviction
+    restart: unless-stopped
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    mem_limit: 192m
+    logging: *logging
+
+volumes:
+  app-storage:
+  postgres-data:
+  redis-data:
