@@ -35,3 +35,5 @@ config:
   sure:sshHostKey: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIN9z3IK/d7aty4f9Gdn1jtTvszpvn0OTrID/Hs+oumKF root@sure
   sure:aiEnabled: "true"
   sure:jevEnabled: "true"
+  amp-orbs:enabled: "true"
+  amp-orbs:sshHostKey: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDGaGlgrp9i5hwOx3WvbgSzv/gHXcQtappIekbacxP+y
