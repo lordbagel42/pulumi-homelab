@@ -19,6 +19,11 @@ x-rails-env: &rails_env
   OPENAI_ACCESS_TOKEN: ${OPENAI_ACCESS_TOKEN:-}
   OPENAI_MODEL: openai/gpt-4.1-mini
   OPENAI_SUPPORTS_RESPONSES_ENDPOINT: "false"
+  # Hack Club AI provides embeddings, not OpenAI's hosted vector-store API.
+  VECTOR_STORE_PROVIDER: pgvector
+  EMBEDDING_URI_BASE: https://ai.hackclub.com/proxy/v1/
+  EMBEDDING_MODEL: baai/bge-m3
+  EMBEDDING_DIMENSIONS: "1024"
   LLM_JSON_MODE: auto
   LLM_CONTEXT_WINDOW: "32768"
   LLM_MAX_RESPONSE_TOKENS: "4096"
@@ -69,7 +74,7 @@ services:
     mem_limit: 768m
     logging: *logging
   db:
-    image: postgres:16
+    image: pgvector/pgvector:0.8.7-pg16-trixie
     restart: unless-stopped
     environment:
       POSTGRES_USER: sure_user

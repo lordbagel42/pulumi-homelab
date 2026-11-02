@@ -65,10 +65,21 @@ both containers: synthetic grocery purchases and bus fares produced the correct,
 distinct categories, and Jev confidence cleared 0.7. A queued
 `WorkerAiHealthCheckJob` returned from the Sidekiq process with LLM `passing`
 and function calling `supported`. The optional vector-store probe returned
-`failing` (the job reported `timeout`/`request_failed` diagnostics); vault
-document search is not configured or verified by this deployment. This is not
-a claim that every AI status probe passes. No account or financial fixtures
-were persisted by these checks. The initial schema load exceeded the original
+`failing` (the job reported `timeout`/`request_failed` diagnostics). Hack Club AI
+does not implement OpenAI's hosted vector-store API. Vault now uses local
+pgvector storage with Hack Club AI's `baai/bge-m3` embeddings (1024 dimensions).
+The PostgreSQL image retains major version 16 and Debian Trixie, matching the
+existing database's collation library; its persistent volume is not replaced.
+A root-only database dump precedes this change in `/opt/sure/backups/`.
+Sure's `Family#upload_document` and `SearchFamilyFiles` paths correctly matched
+two distinct synthetic documents (bicycle warranty and travel insurance) through
+semantic queries. Fixtures were rolled back and their store had zero chunks
+afterward. The web-config vector and embedding probes passed; a queued job in
+the actual Sidekiq PID 1 returned vector `passing`, LLM `passing` and function
+calling `supported`. That job still reported an optional PDF-probe `timeout`;
+this is not a claim that every AI probe is green, or that browser upload was
+tested. No account or financial fixtures were persisted by these checks.
+The initial schema load exceeded the original
 health grace; it completed without a database reset, and the provisioner now
 allows a ten-minute cold-start grace. The final Sure-only preview was unchanged.
 
@@ -86,10 +97,12 @@ Infisical resource names. Double stars match the complete Pulumi URN. Do not
 use a whole-stack apply from incomplete source or disable resource protection.
 
 At deployment time, `origin/main` (`e4259bb`) lacked the live `amp-orbs`
-definition. Its owning source is the untracked
+definition. Its owning source was the untracked
 `/home/amp/workspaces/pulumi-homelab/lxcs/amp-orbs/` directory in the original,
-diverged checkout. This branch owns `lxcs/sure/`; it does not adopt or overwrite
-that other service's local work. Preserve the original checkout and its config.
+diverged checkout. Following explicit reconciliation approval, this branch
+preserves those nine service files and its enable/host-key settings; the
+original checkout remains untouched. See the provenance in `../amp-orbs/README.md`.
+This was source/state divergence, not evidence of a runtime outage.
 
 Before any merge that triggers a full-stack deployment, reconcile **both**
 owning modules and their non-secret enable/host-key settings into a candidate
