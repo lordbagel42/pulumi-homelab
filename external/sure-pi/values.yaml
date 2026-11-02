@@ -1,0 +1,105 @@
+# Official chart sure/sure 0.7.6; see README before installing.
+fullnameOverride: sure
+image:
+  repository: ghcr.io/we-promise/sure
+  tag: "0.7.6@sha256:faf7116f462318d63cc9c2b778cefadcd5b14dab5a75b0bfac42a82a0f87afc8"
+
+# Use mrow's existing CNPG operator, not another cluster-wide controller.
+# The dedicated database and Redis live in prerequisites.yaml.
+cnpg:
+  enabled: false
+  cluster:
+    enabled: false
+redisOperator:
+  enabled: false
+  managed:
+    enabled: false
+redisSimple:
+  enabled: false
+
+rails:
+  existingSecret: sure-app
+  settings:
+    SELF_HOSTED: "true"
+    # Private port-forward only until a separate HTTPS route is reviewed.
+    RAILS_FORCE_SSL: "false"
+    RAILS_ASSUME_SSL: "false"
+    # Bootstrap the first admin privately, then close signups in Settings.
+    ONBOARDING_STATE: "open"
+    ACTIVE_STORAGE_SERVICE: local
+    DB_HOST: sure-db-rw
+    POSTGRES_USER: sure
+    POSTGRES_DB: sure_production
+    RAILS_MAX_THREADS: "3"
+    WEB_CONCURRENCY: "1"
+    LLM_PROVIDER: openai
+    OPENAI_URI_BASE: https://ai.hackclub.com/proxy/v1
+    OPENAI_MODEL: openai/gpt-4.1-mini
+    OPENAI_SUPPORTS_RESPONSES_ENDPOINT: "false"
+    # Start with text/chat; PDF and hosted vector-store APIs are not verified.
+    OPENAI_SUPPORTS_PDF_PROCESSING: "false"
+    LLM_CONTEXT_WINDOW: "16384"
+    LLM_MAX_RESPONSE_TOKENS: "2048"
+    AI_DEBUG_MODE: "false"
+  extraEnvVars:
+    - name: POSTGRES_PASSWORD
+      valueFrom:
+        secretKeyRef: { name: sure-db-app, key: password }
+    - name: REDIS_PASSWORD
+      valueFrom:
+        secretKeyRef: { name: sure-app, key: redis-password }
+    - name: REDIS_URL
+      value: "redis://default:$(REDIS_PASSWORD)@sure-redis:6379/0"
+    - name: OPENAI_ACCESS_TOKEN
+      valueFrom:
+        secretKeyRef: { name: sure-app, key: OPENAI_ACCESS_TOKEN }
+
+web:
+  replicas: 1
+  nodeSelector: { kubernetes.io/arch: arm64 }
+  # Bypass the image's automatic db:prepare; the initContainer owns migrations.
+  command: ["bash", "-lc"]
+  args: ["exec bundle exec rails server -b 0.0.0.0"]
+  resources:
+    requests: { cpu: 100m, memory: 512Mi }
+    limits: { memory: 1Gi }
+  startupProbe:
+    httpGet: { path: /up, port: http }
+    failureThreshold: 120
+    periodSeconds: 5
+  extraVolumes:
+    - name: uploads
+      persistentVolumeClaim: { claimName: sure-uploads }
+  extraVolumeMounts:
+    - { name: uploads, mountPath: /rails/storage }
+
+worker:
+  replicas: 1
+  nodeSelector: { kubernetes.io/arch: arm64 }
+  resources:
+    requests: { cpu: 100m, memory: 512Mi }
+    limits: { memory: 1Gi }
+  extraVolumes:
+    - name: uploads
+      persistentVolumeClaim: { claimName: sure-uploads }
+  extraVolumeMounts:
+    - { name: uploads, mountPath: /rails/storage }
+
+# A post-install hook can deadlock with --wait on a fresh database. Prepare
+# the schema in the web initContainer instead, including on first install.
+migrations:
+  strategy: initContainer
+  initContainer:
+    command: ["bash", "-lc"]
+    args: |
+      set -e
+      until pg_isready -h "$DB_HOST" -U "$POSTGRES_USER"; do sleep 5; done
+      bundle exec rails db:prepare
+    resources:
+      requests: { cpu: 100m, memory: 512Mi }
+      limits: { memory: 1Gi }
+
+service:
+  type: ClusterIP
+ingress:
+  enabled: false

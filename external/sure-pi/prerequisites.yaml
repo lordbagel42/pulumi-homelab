@@ -1,0 +1,118 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: sure-pi
+---
+# Separate database: never connect this experiment to the Optiplex instance.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: sure-db
+  namespace: sure-pi
+spec:
+  instances: 1
+  imageName: ghcr.io/cloudnative-pg/postgresql:16@sha256:f7f6d8e7cac77e4a1f7e6acb06b261f7f26ef1928315ff3524db52f970014aee
+  enableSuperuserAccess: false
+  affinity:
+    nodeSelector: { kubernetes.io/arch: arm64 }
+  storage:
+    size: 8Gi
+    storageClass: local-path
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { memory: 512Mi }
+  postgresql:
+    parameters:
+      shared_buffers: 128MB
+      max_connections: "50"
+  bootstrap:
+    initdb:
+      database: sure_production
+      owner: sure
+      secret: { name: sure-db-app }
+---
+# Web and Sidekiq can run on different Pis, so uploads must be shared RWX.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: sure-uploads
+  namespace: sure-pi
+spec:
+  accessModes: [ReadWriteMany]
+  storageClassName: juicefs
+  resources:
+    requests: { storage: 5Gi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sure-redis
+  namespace: sure-pi
+spec:
+  clusterIP: None
+  selector: { app: sure-redis }
+  ports:
+    - { name: redis, port: 6379, targetPort: redis }
+---
+# StatefulSet avoids two Redis writers sharing one PVC during a rollout.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: sure-redis
+  namespace: sure-pi
+spec:
+  serviceName: sure-redis
+  replicas: 1
+  selector:
+    matchLabels: { app: sure-redis }
+  template:
+    metadata:
+      labels: { app: sure-redis }
+    spec:
+      nodeSelector: { kubernetes.io/arch: arm64 }
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 999
+        fsGroup: 999
+        fsGroupChangePolicy: OnRootMismatch
+      containers:
+        - name: redis
+          image: redis:7.4-alpine@sha256:c1945f0eeb2d503f8421952da953a3804d38e4f004d4ef11d57826da59d2c332
+          command: ["sh", "-ec"]
+          args:
+            - exec redis-server --appendonly yes --appendfsync everysec --dir /data --requirepass "$REDIS_PASSWORD"
+          env:
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: sure-app, key: redis-password }
+          ports:
+            - { name: redis, containerPort: 6379 }
+          readinessProbe:
+            exec:
+              command:
+                [
+                  "sh",
+                  "-ec",
+                  'REDISCLI_AUTH="$REDIS_PASSWORD" redis-cli ping | grep -qx PONG',
+                ]
+          livenessProbe:
+            tcpSocket: { port: redis }
+            initialDelaySeconds: 30
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+            limits: { memory: 256Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: { drop: [ALL] }
+          volumeMounts:
+            - { name: data, mountPath: /data }
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: [ReadWriteOnce]
+        storageClassName: local-path
+        resources:
+          requests: { storage: 1Gi }
