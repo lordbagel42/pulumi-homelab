@@ -38,5 +38,13 @@ docker save "$image" | ssh "${ssh_options[@]}" root@192.168.0.230 docker load
 local_id=$(docker image inspect --format '{{.Id}}' "$image")
 remote_id=$(ssh "${ssh_options[@]}" root@192.168.0.230 \
     docker image inspect --format '{{.Id}}' "$image")
-test "$local_id" = "$remote_id"
+printf 'Image verification: tag=%s local_id=%q remote_id=%q\n' "$image" "$local_id" "$remote_id"
+if [[ "$local_id" != "$remote_id" ]]; then
+    docker version --format 'Local Docker server: {{.Server.Version}}'
+    docker info --format 'Local image store: {{.Driver}} {{json .DriverStatus}}'
+    ssh "${ssh_options[@]}" root@192.168.0.230 \
+        "docker version --format 'Remote Docker server: {{.Server.Version}}'; docker info --format 'Remote image store: {{.Driver}} {{json .DriverStatus}}'"
+    echo "Image identity mismatch; refusing Pulumi deployment" >&2
+    exit 1
+fi
 printf 'Loaded %s with matching image ID %s\n' "$image" "$local_id"
