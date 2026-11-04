@@ -136,7 +136,9 @@ jobs:
         env:
           PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          HOSTED: "true"
+          # Match the existing providers' LAN endpoint inputs. Netbird supplies
+          # the LAN route; switching endpoint identity would update providers.
+          HOSTED: "false"
           PULUMI_EXPERIMENTAL: "true"
           PULUMI_ENABLE_STREAMING_JSON_PREVIEW: "true"
 
