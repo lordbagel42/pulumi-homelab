@@ -22,6 +22,22 @@ docker build --build-arg VERSION="$sha" -t "bambu-api:$sha" .
 docker save "bambu-api:$sha" | ssh root@192.168.0.230 docker load
 ```
 
+For a full 40-character commit tag in `bambu-api:image`, the existing Deploy
+workflow also accepts `bambu_api_only=true` on manual dispatch. It builds that
+exact public source revision, loads and verifies the image on VM230 using the
+ESC SSH identity and configured host key, previews only the existing Bambu job,
+rejects other updates/replacements, applies the saved plan through Pulumi, and
+requires a refreshed no-change preview afterward. It never runs `nomad job run`
+outside Pulumi or rotates the stored data key. Keep the image config change in
+the owning source branch; do not leave main pointing at a superseded image.
+
+When using this scoped path, validate the source branch first, then preserve
+`[skip ci]` in the final commit landing on main so the push does not also launch
+the unrelated full-stack deployment. Manually dispatch Deploy at that exact main
+revision with `bambu_api_only=true`. A workflow-dispatch run is not suppressed by
+the commit marker. The final targeted no-change preview proves the Bambu job's
+convergence only, not whole-stack convergence.
+
 ## Configuration
 
 | Pulumi key             | Purpose                                                  |

@@ -5,6 +5,11 @@ on:
     branches:
       - main
   workflow_dispatch:
+    inputs:
+      bambu_api_only:
+        description: Build the pinned Bambu API image and update only its Pulumi job
+        type: boolean
+        default: false
 
 concurrency:
   group: deploy-infra
@@ -87,13 +92,51 @@ jobs:
 
       - name: Install Pulumi CLI
         uses: pulumi/actions@v6
+        with:
+          pulumi-version: 3.273.0
 
       - name: Fetch pinned artifacts binary
         run: bash lxcs/artifacts/fetch-bundle.sh
         env:
           PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
 
+      - name: Build and load pinned Bambu API image
+        if: inputs.bambu_api_only
+        run: bash nomad/bambu-api/load-image.sh
+        env:
+          PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
+
+      - name: Deploy and verify only the Bambu API job
+        if: inputs.bambu_api_only
+        shell: bash
+        run: |
+          set -euo pipefail
+          target='urn:pulumi:homelab::pulumi-homelab::nomad:index/job:Job::bambu-api'
+          plan=$(mktemp)
+          events=$(mktemp)
+          trap 'rm -f "$plan" "$events"' EXIT
+          pulumi preview --stack homelab --target "$target" --refresh --save-plan "$plan" --json > "$events"
+          jq -s -e --arg target "$target" '
+            ([.[] | .summaryEvent? | select(. != null)] | length == 1) and
+            ([.[] | .resourcePreEvent.metadata? | select(.urn == $target)
+              | select(.op == "same" or .op == "update")] | length > 0) and
+            ([.[] | .resourcePreEvent.metadata? | select(. != null)
+              | select(.op != "same" and .op != "read" and .op != "refresh")
+              | select(.urn != $target or .op != "update")] | length == 0)
+          ' "$events"
+          jq -s '[.[] | .summaryEvent? | select(. != null) | .resourceChanges]' "$events"
+          pulumi up --stack homelab --target "$target" --plan "$plan" --yes --skip-preview
+          pulumi preview --stack homelab --target "$target" --refresh --expect-no-changes
+          curl --fail --silent --show-error https://bambuapi.raygen.dev/v1/healthz
+        env:
+          PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HOSTED: "true"
+          PULUMI_EXPERIMENTAL: "true"
+          PULUMI_ENABLE_STREAMING_JSON_PREVIEW: "true"
+
       - uses: pulumi/actions@v6
+        if: ${{ !inputs.bambu_api_only }}
         with:
           command: up
           stack-name: homelab
