@@ -34,17 +34,24 @@ host_key=$(jq -er '."bambu-api:sshHostKey".value' "$staging/config.json")
 printf '192.168.0.230 %s\n' "$host_key" > "$staging/known_hosts"
 ssh_options=(-i "$staging/key" -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes
     -o "UserKnownHostsFile=$staging/known_hosts" -o ConnectTimeout=15)
-docker save "$image" | ssh "${ssh_options[@]}" root@192.168.0.230 docker load
-local_id=$(docker image inspect --format '{{.Id}}' "$image")
-remote_id=$(ssh "${ssh_options[@]}" root@192.168.0.230 \
-    docker image inspect --format '{{.Id}}' "$image")
-printf 'Image verification: tag=%s local_id=%q remote_id=%q\n' "$image" "$local_id" "$remote_id"
-if [[ "$local_id" != "$remote_id" ]]; then
-    docker version --format 'Local Docker server: {{.Server.Version}}'
-    docker info --format 'Local image store: {{.Driver}} {{json .DriverStatus}}'
-    ssh "${ssh_options[@]}" root@192.168.0.230 \
-        "docker version --format 'Remote Docker server: {{.Server.Version}}'; docker info --format 'Remote image store: {{.Driver}} {{json .DriverStatus}}'"
-    echo "Image identity mismatch; refusing Pulumi deployment" >&2
-    exit 1
-fi
-printf 'Loaded %s with matching image ID %s\n' "$image" "$local_id"
+# Docker's classic and containerd stores expose different kinds of .Id.
+# Compare the exact config blob instead; it includes ordered layer DiffIDs.
+docker save --output "$staging/image.tar" "$image"
+config_path=$(tar -xOf "$staging/image.tar" manifest.json | jq -er --arg image "$image" \
+    'if length == 1 and (.[0].RepoTags | index($image) != null) then .[0].Config else error("unexpected image manifest") end')
+local_digest=$(tar -xOf "$staging/image.tar" "$config_path" | sha256sum | cut -d ' ' -f 1)
+ssh "${ssh_options[@]}" root@192.168.0.230 docker load < "$staging/image.tar"
+remote_digest=$(ssh "${ssh_options[@]}" root@192.168.0.230 bash -s -- "$image" <<'REMOTE'
+set -euo pipefail
+umask 077
+archive=$(mktemp /tmp/bambu-image-check.XXXXXX)
+trap 'rm -f "$archive"' EXIT
+docker save --output "$archive" "$1"
+config_path=$(tar -xOf "$archive" manifest.json | jq -er --arg image "$1" \
+    'if length == 1 and (.[0].RepoTags | index($image) != null) then .[0].Config else error("unexpected image manifest") end')
+tar -xOf "$archive" "$config_path" | sha256sum | cut -d ' ' -f 1
+REMOTE
+)
+printf 'Image config verification: local=%q remote=%q\n' "$local_digest" "$remote_digest"
+test "$local_digest" = "$remote_digest"
+printf 'Loaded %s with matching config blob and layer DiffIDs\n' "$image"
