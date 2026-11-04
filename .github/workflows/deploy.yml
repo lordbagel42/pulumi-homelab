@@ -116,6 +116,11 @@ jobs:
           events=$(mktemp)
           trap 'rm -f "$plan" "$events"' EXIT
           pulumi preview --stack homelab --target "$target" --refresh --save-plan "$plan" --json > "$events"
+          # Log only operation identities, never resource inputs or secret values.
+          jq -s '{summaries: [.[] | .summaryEvent? | select(. != null)],
+            operations: [.[] | .resourcePreEvent.metadata? | select(. != null)
+              | select(.op != "same" and .op != "read" and .op != "refresh")
+              | {urn, op}]}' "$events"
           jq -s -e --arg target "$target" '
             ([.[] | .summaryEvent? | select(. != null)] | length == 1) and
             ([.[] | .resourcePreEvent.metadata? | select(.urn == $target)
