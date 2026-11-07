@@ -10,7 +10,7 @@ job "oracle-cloudflared" {
       driver = "docker"
 
       config {
-        image        = "cloudflare/cloudflared:latest"
+        image        = "cloudflare/cloudflared:2026.10.4"
         network_mode = "host"
         args = [
           "tunnel",

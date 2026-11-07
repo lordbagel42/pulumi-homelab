@@ -319,9 +319,11 @@
 
     - name: Install cloudflared
       get_url:
-        url: "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64"
+        url: "https://github.com/cloudflare/cloudflared/releases/download/2026.10.4/cloudflared-linux-amd64"
+        checksum: "sha256:ae5e8add7884b0531d66bbca4570d1de491ff6da51e4ebe7eb160cdf241d9e42"
         dest: /usr/local/bin/cloudflared
         mode: '0755'
+      notify: Restart running cloudflared
       when: role == 'cloudflared'
 
     - name: Create cloudflared config directory
@@ -641,3 +643,9 @@
       debug:
         msg: "{{ cni_state.stdout_lines | default([]) }}"
       when: role == 'nomad-client'
+
+  handlers:
+    # Keep new tunnels stopped until Pulumi has supplied their credentials.
+    - name: Restart running cloudflared
+      command: systemctl try-restart cloudflared.service
+      changed_when: true
