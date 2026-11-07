@@ -1,0 +1,35 @@
+[Unit]
+Description=Amp self-hosted orb provider (E2B)
+Wants=network-online.target
+After=network-online.target
+ConditionPathExists=/etc/amp-orbs/provider.env
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=amp-orbs
+Group=amp-orbs
+WorkingDirectory=/opt/amp-orbs
+EnvironmentFile=/etc/amp-orbs/e2b.env
+EnvironmentFile=/etc/amp-orbs/provider.env
+Environment=HOME=/var/lib/amp-orbs
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+ExecStart=/usr/local/bin/amp orb provider /opt/amp-orbs/dispatch.mjs
+Restart=always
+RestartSec=10
+TimeoutStopSec=30
+KillMode=control-group
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/amp-orbs
+CapabilityBoundingSet=
+RestrictSUIDSGID=true
+MemoryHigh=512M
+MemoryMax=640M
+TasksMax=128
+
+[Install]
+WantedBy=multi-user.target
